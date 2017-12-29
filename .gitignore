@@ -1,0 +1,7 @@
+data/
+files/
+credentials.txt
+session.cookie
+files.txt
+venv
+**/.ipynb_checkpoints
