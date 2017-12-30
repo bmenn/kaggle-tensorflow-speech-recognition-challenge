@@ -5,3 +5,5 @@ session.cookie
 files.txt
 venv
 **/.ipynb_checkpoints
+**/.eggs
+*.egg-info
