@@ -1,12 +1,15 @@
 '''Tests tfspeech.tasks.data
 
 '''
-import shutils
+import shutil
 import tempfile
+
+import pytest
 
 import tfspeech.tasks.data
 
 
+@pytest.fixture
 def temp_dir():
     directory = tempfile.mkdtemp()
     yield directory
@@ -22,4 +25,5 @@ def test_CreateSilenceSnippets(temp_dir):
     task.run()
 
     # TODO: Need to check the target contents
+    # TODO: Test expect data files from Kaggle already be downloaded
     assert task.complete()

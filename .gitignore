@@ -7,3 +7,5 @@ venv
 **/.ipynb_checkpoints
 **/.eggs
 *.egg-info
+.testmondata
+.cache
