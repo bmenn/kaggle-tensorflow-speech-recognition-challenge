@@ -5,10 +5,13 @@ INSTALL_REQUIREMENTS = [
     'tensorflow-gpu',
     'luigi',
     'scipy',
+    'h5py',
 ]
 TESTS_REQUIREMENTS = [
     'pytest-runner',
     'pytest',
+    'pytest-testmon',
+    'pytest-watch',
     'pylint',
 ]
 

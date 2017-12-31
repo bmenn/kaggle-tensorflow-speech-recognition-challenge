@@ -34,3 +34,19 @@ def test_create_validation_groups():
 
     assert (sorted([sorted(p) for p in partitions], key=lambda p: p[0]) ==
             sorted([sorted(p) for p in expected], key=lambda p: p[0]))
+
+
+def test_parse_path_metadata():
+    '''`tfspeech.utils.parse_path_metadata` SHALL retrieve speaker
+    (`SPEAKER`), label (`LABEL`), and instance count (`COUNT`) from path in
+    the following format:
+
+        foo/bar/LABEL/SPEAKER_baz_COUNT.wav
+
+    '''
+    path = 'foo/bar/LABEL/SPEAKER_baz_1.wav'
+
+    metadata = tfspeech.utils.parse_path_metadata(path)
+    expected = {'speaker': 'SPEAKER', 'count': 1, 'label': 'LABEL'}
+
+    assert metadata == expected
