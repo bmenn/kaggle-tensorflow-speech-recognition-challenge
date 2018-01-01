@@ -12,11 +12,11 @@ import luigi.util
 import numpy as np
 import scipy.io.wavfile
 
+import tfspeech.models as models
 import tfspeech.utils as utils
 
 
-LABELS = ['yes', 'no', 'up', 'down', 'left', 'right', 'on',
-          'off', 'stop', 'go', 'silence', 'unknown']
+LABELS = models.LABELS
 
 
 class BackgroundNoiseRecordings(luigi.ExternalTask):
