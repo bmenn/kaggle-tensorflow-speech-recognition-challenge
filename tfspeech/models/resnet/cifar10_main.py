@@ -24,7 +24,7 @@ import sys
 
 import tensorflow as tf
 
-import resnet_model
+import tfspeech.models.resnet.resnet_model as resnet_model
 
 parser = argparse.ArgumentParser()
 

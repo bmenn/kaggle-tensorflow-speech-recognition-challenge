@@ -24,8 +24,8 @@ import sys
 
 import tensorflow as tf
 
-import resnet_model
-import vgg_preprocessing
+import tfspeech.models.resnet.resnet_model as resnet_model
+import tfspeech.models.resnet.vgg_preprocessing as vgg_preprocessing
 
 parser = argparse.ArgumentParser()
 

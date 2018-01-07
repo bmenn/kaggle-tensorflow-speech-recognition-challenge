@@ -3,11 +3,16 @@
 '''
 import tensorflow as tf
 
+from .resnet import resnet_model as resnet_model
+
 
 LABELS = ['yes', 'no', 'up', 'down', 'left', 'right', 'on',
           'off', 'stop', 'go', 'silence', 'unknown']
 SAMPLE_INPUT_LENGTH = 16000
 SAMPLE_RATE = 16000
+
+_MOMENTUM = 0.9
+_WEIGHT_DECAY = 1e-4
 
 
 # Helper functions stolen from
@@ -186,4 +191,125 @@ def log_mel_spectrogram_cnn():
         's': s,
         'keep_prob': keep_prob,
         'y_predict': prediction,
+    }
+
+
+# TODO: Need to understand what the resnet_size and num_mel_bins parameters
+# does
+def log_mel_spectrogram_resnet(resnet_size, batch_size,
+                               num_training_samples):
+    # TODO: Add inference graph, see
+    # tensorflow/tensorflow/examples/speech_commands/freeze.py
+    with tf.variable_scope('training'):
+        x = tf.placeholder(tf.float32, shape=[None, SAMPLE_INPUT_LENGTH],
+                           name='wav_input')
+        s = tf.placeholder(tf.int32, shape=[None, 1],
+                           name='sample_rate')
+        y_ = tf.placeholder(tf.float32, shape=[None, len(LABELS)],
+                            name='label')
+    is_training = tf.placeholder(tf.bool, name='is_training')
+    global_step = tf.train.get_or_create_global_step()
+
+    # MFCC related code stolen from
+    # https://tensorflow.org/api_guides/python/contrib.signal#Computing_spectrograms
+    stfts = tf.contrib.signal.stft(x, frame_length=128, frame_step=64,
+                                   fft_length=1024)
+    magnitude_spectrograms = tf.abs(stfts)
+
+    num_spectrograms_bins = magnitude_spectrograms.shape[-1].value
+    lower_edge_hertz, upper_edge_hertz, num_mel_bins = 80.0, 7600.0, 64
+    linear_to_mel_weight_matrix = tf.contrib.signal.linear_to_mel_weight_matrix(
+        num_mel_bins, num_spectrograms_bins, SAMPLE_RATE,
+        lower_edge_hertz, upper_edge_hertz
+    )
+
+    mel_spectrograms = tf.tensordot(magnitude_spectrograms,
+                                    linear_to_mel_weight_matrix, 1)
+    mel_spectrograms.set_shape(
+        magnitude_spectrograms.shape[:-1].concatenate(
+            linear_to_mel_weight_matrix.shape[-1:]))
+
+    log_offset = 1e-6
+    log_mel_spectrograms = tf.log(mel_spectrograms + log_offset)
+
+    image_size = [log_mel_spectrograms.shape[-2].value,
+                  log_mel_spectrograms.shape[-1].value]
+    log_mel_channels = tf.reshape(
+        log_mel_spectrograms,
+        [-1, image_size[0], image_size[1], 1])
+    log_mel_channels = tf.image.resize_images(
+        log_mel_channels,
+        size=(224, 224))
+
+    # Much of what is below is copied from imagenet_main.py (which is from
+    # Tensorflow official models
+    network = resnet_model.imagenet_resnet_v2(
+        resnet_size, len(LABELS) + 0)
+    logits = network(inputs=log_mel_channels,
+                     is_training=is_training)
+
+    predictions = {
+        'classes': tf.argmax(logits, axis=1, name='predict'),
+        'probabilities': tf.nn.softmax(logits, name='softmax_tensor')
+    }
+
+    cross_entropy = tf.losses.softmax_cross_entropy(
+        logits=logits, onehot_labels=y_)
+
+    # Create a tensor named cross_entropy for logging purposes.
+    tf.identity(cross_entropy, name='cross_entropy')
+    tf.summary.scalar('cross_entropy', cross_entropy)
+
+    # Add weight decay to the loss. We exclude the batch norm variables because
+    # doing so leads to a small improvement in accuracy.
+    loss = cross_entropy + _WEIGHT_DECAY * tf.add_n(
+        [tf.nn.l2_loss(v) for v in tf.trainable_variables()
+         if 'batch_normalization' not in v.name])
+
+    # Scale the learning rate linearly with the batch size. When the batch size
+    # is 256, the learning rate should be 0.1.
+    initial_learning_rate = 0.1 * batch_size / 256
+    batches_per_epoch = num_training_samples / batch_size
+
+    # Multiply the learning rate by 0.1 at 30, 60, 80, and 90 epochs.
+    boundaries = [
+        int(batches_per_epoch * epoch) for epoch in [30, 60, 80, 90]]
+    values = [
+        initial_learning_rate * decay for decay in [1, 0.1, 0.01, 1e-3, 1e-4]]
+    learning_rate = tf.train.piecewise_constant(
+        tf.cast(global_step, tf.int32), boundaries, values)
+
+    # Create a tensor named learning_rate for logging purposes.
+    tf.identity(learning_rate, name='learning_rate')
+    tf.summary.scalar('learning_rate', learning_rate)
+
+    optimizer = tf.train.MomentumOptimizer(
+        learning_rate=learning_rate,
+        momentum=_MOMENTUM)
+
+    # Batch norm requires update_ops to be added as a train_op dependency.
+    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    minimize = optimizer.minimize(loss, global_step, name='train_step')
+    with tf.control_dependencies(update_ops):
+        train_op = tf.cond(
+            is_training,
+            lambda: minimize,
+            lambda: tf.no_op(),
+        )
+
+    accuracy = tf.metrics.accuracy(
+        tf.argmax(y_, axis=1), predictions['classes'])
+    metrics = {'accuracy': accuracy}
+
+    # Create a tensor named train_accuracy for logging purposes.
+    tf.identity(accuracy[1], name='train_accuracy')
+    tf.summary.scalar('train_accuracy', accuracy[1])
+
+    return {
+        'train_step': train_op,
+        'x': x,
+        'y': y_,
+        's': s,
+        'is_training': is_training,
+        'y_predict': predictions['classes'],
     }

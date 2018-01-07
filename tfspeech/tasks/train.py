@@ -63,6 +63,9 @@ class TrainTensorflowModel(luigi.Task):
     def save_path(self):
         return 'data/models/' + self.model_id
 
+    def build_graph(self, num_samples):
+        return self.model_class()()
+
     def run(self):
         x = []
         for data_file in self.data_files:
@@ -76,11 +79,11 @@ class TrainTensorflowModel(luigi.Task):
                 y.append(hf['data'][:])
         y = np.vstack(y)
 
-        ops = self.model_class()()
-
         data_indices = np.arange(len(y))
         np.random.shuffle(data_indices)
         start_index = 0
+
+        ops = self.build_graph(len(y))
 
         steps = int(self.num_epochs * len(y) / self.batch_size)
         # TODO: Need to implement some kind of atomic like behavior similar
@@ -89,7 +92,7 @@ class TrainTensorflowModel(luigi.Task):
         builder = tf.saved_model.builder.SavedModelBuilder(self.save_path)
         with tf.Session() as sess:
             sess.run(tf.global_variables_initializer())
-            ops = self.model_class()
+
 
             # Normally training is not done with a dropout set to 0 (i.e.,
             # keep_prob=1.0), but we only need to check that the model is
@@ -103,8 +106,17 @@ class TrainTensorflowModel(luigi.Task):
                     'training/wav_input:0': x[start_index:stop_index],
                     'training/label:0': y[start_index:stop_index],
                     'training/sample_rate:0': 16000 * np.ones((self.batch_size, 1)),
-                    'keep_probability:0': 1 - self.dropout_rate,
                 }
+                try:
+                    sess.graph.get_operation_by_name('keep_probability')
+                    feed_dict.update({'keep_probability:0': 1.0 - self.dropout_rate})
+                except KeyError:
+                    pass
+                try:
+                    sess.graph.get_operation_by_name('is_training')
+                    feed_dict.update({'is_training:0': True})
+                except KeyError:
+                    pass
                 sess.run(
                     'train_step',
                     feed_dict=feed_dict
@@ -119,6 +131,18 @@ class TrainTensorflowModel(luigi.Task):
                                 separators=(',', ':'), sort_keys=True)
         with self.output()['metadata'].open('w') as f:
             f.write(param_json)
+
+
+class TrainParametrizedTensorflowModel(TrainTensorflowModel):
+
+    '''Abstract base class for training parametrized Tensorflow models
+
+    '''
+
+    model_settings = luigi.DictParameter()
+
+    def build_graph(self, num_samples):
+        return self.model_class()(**self.model_settings)
 
 
 class MfccSpectrogramCNN(TrainTensorflowModel):
@@ -141,6 +165,25 @@ class LogMelSpectrogramCNN(TrainTensorflowModel):
     @staticmethod
     def model_class():
         return models.log_mel_spectrogram_cnn
+
+
+class LogMelSpectrogramResNet(TrainParametrizedTensorflowModel):
+
+    '''Trains a ResNet using log Mel spectrograms
+
+    '''
+
+    @staticmethod
+    def model_class():
+        return models.log_mel_spectrogram_resnet
+
+    def build_graph(self, num_samples):
+        data_sizes = {
+            'num_training_samples': num_samples,
+            'batch_size': self.batch_size,
+        }
+        settings = {**self.model_settings, **data_sizes}
+        return self.model_class()(**settings)
 
 
 @luigi.util.inherits(TrainTensorflowModel)
@@ -193,8 +236,17 @@ class ValidateTensorflowModel(luigi.Task):
                     'training/wav_input:0': x[i:i+1024],
                     'training/label:0': y[i:i+1024],
                     'training/sample_rate:0': 16000 * np.ones((len(y[i:i+1024]), 1)),
-                    'keep_probability:0': 1,
                 }
+                try:
+                    sess.graph.get_operation_by_name('keep_probability')
+                    feed_dict.update({'keep_probability:0': 1.0})
+                except KeyError:
+                    pass
+                try:
+                    sess.graph.get_operation_by_name('is_training')
+                    feed_dict.update({'is_training:0': False})
+                except KeyError:
+                    pass
                 predictions.append(sess.run(
                     'predict:0',
                     feed_dict=feed_dict
@@ -233,6 +285,15 @@ class ValidateLogMelSpectrogramCNN(ValidateTensorflowModel):
     pass
 
 
+@luigi.util.requires(LogMelSpectrogramResNet)
+class ValidateLogMelSpectrogramResNet(ValidateTensorflowModel):
+
+    '''Validates LogMelSpectrogramResNet
+
+    '''
+    pass
+
+
 @luigi.util.requires(data.DoDataPreProcessing)
 class InitiateTraining(luigi.Task):
 
@@ -255,7 +316,16 @@ class TrainAllModels(luigi.Task):
     validation_tasks = [ValidateMfccSpectrogramCNN,
                         ValidateLogMelSpectrogramCNN]
     train_all_data_task = [MfccSpectrogramCNN,
-                           LogMelSpectrogramCNN]
+                           LogMelSpectrogramCNN,
+                           LogMelSpectrogramResNet]
+    # Some models are not configurable due to old implementation. In an
+    # effort to not delete previously trained data, None is use to hack
+    # older implementations into compatibility.
+    model_settings = [
+        None,
+        None,
+        {'resnet_size': 50}
+    ]
 
     def model_tasks(self):
         models = []
@@ -263,18 +333,51 @@ class TrainAllModels(luigi.Task):
             data_subset = self.data_files[:i] + self.data_files[i+1:]
             labels_subset = self.label_files[:i] + self.label_files[i+1:]
             for j in range(len(data_subset)):
-                for task_class in self.validation_tasks:
-                    models.append(task_class(
-                        data_files=data_subset[:j+1],
-                        label_files=labels_subset[:j+1],
-                        validation_data=[self.data_files[i]],
-                        validation_labels=[self.label_files[i]],
-                    ))
-        for task_class in self.train_all_data_task:
-            models.append(task_class(
-                data_files=self.data_files,
-                label_files=self.label_files,
+                for task_class, settings in zip(self.validation_tasks,
+                                                self.model_settings):
+                    if isinstance(task_class,
+                                  ValidateLogMelSpectrogramResNet):
+                        # Resnet might take a while to training, so only
+                        # doing one set
+                        continue
+
+                    if settings is None:
+                        models.append(task_class(
+                            data_files=data_subset[:j+1],
+                            label_files=labels_subset[:j+1],
+                            validation_data=[self.data_files[i]],
+                            validation_labels=[self.label_files[i]],
+                        ))
+                    else:
+                        models.append(task_class(
+                            data_files=data_subset[:j+1],
+                            label_files=labels_subset[:j+1],
+                            validation_data=[self.data_files[i]],
+                            validation_labels=[self.label_files[i]],
+                            model_settings=settings,
+                        ))
+            # Add Resnet model
+            models.append(ValidateLogMelSpectrogramResNet(
+                data_files=data_subset,
+                label_files=labels_subset,
+                validation_data=[self.data_files[i]],
+                validation_labels=[self.label_files[i]],
+                model_settings=self.model_settings[2]
             ))
+
+        for task_class, settings in zip(self.train_all_data_task,
+                                        self.model_settings):
+            if settings is None:
+                models.append(task_class(
+                    data_files=self.data_files,
+                    label_files=self.label_files,
+                ))
+            else:
+                models.append(task_class(
+                    data_files=self.data_files,
+                    label_files=self.label_files,
+                    model_settings=settings,
+                ))
 
         return models
 
