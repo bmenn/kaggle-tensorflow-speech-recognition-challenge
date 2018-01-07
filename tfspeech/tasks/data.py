@@ -231,3 +231,47 @@ class DoDataPreProcessing(luigi.Task):
             self.clone(ConvertFilenameToLabel, partition_id=i)
             for i in range(self.num_partitions)
         ]
+
+
+class ConvertTestWavToArray(luigi.Task):
+
+    '''Convert wavfiles to arrays of floats'''
+
+    base_dir = luigi.Parameter(default='data')
+    resources = {'tensorflow': 1}
+
+    def output(self):
+        return {
+            'data': luigi.LocalTarget(
+                os.path.join(
+                    self.base_dir,
+                    'test.h5',  # pylint: disable=no-member
+                )
+            ),
+            'files': luigi.LocalTarget(
+                os.path.join(
+                    self.base_dir,
+                    'test_files.txt',  # pylint: disable=no-member
+                )
+            )
+        }
+
+    def run(self):
+        # TODO need to make this not dependent on current working directory
+        filenames = sorted([
+            os.path.abspath(path)
+            for path in glob.iglob('data/test/audio/*.wav')
+        ])
+
+        # Batching otherwise memory becomes an issue
+        data = []
+        for i in range(0, len(filenames), 10000):
+            data.append(utils.load_wav_file(filenames[i:i+10000]))
+        data = np.vstack(data)
+
+        with h5py.File(self.output()['data'].path, 'w') as hf:
+            hf.create_dataset('data', data=data)
+        with self.output()['files'].open('w') as f:
+            f.write(
+                '\n'.join([os.path.split(fname)[1] for fname in filenames])
+            )

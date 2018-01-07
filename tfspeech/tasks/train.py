@@ -14,57 +14,15 @@ import tfspeech.models as models
 import tfspeech.tasks.data as data
 
 
-@luigi.util.requires(data.DoDataPreProcessing)
-class InitiateTraining(luigi.Task):
+class TrainTensorflowModel(luigi.Task):
 
-    '''Initiates training of all models
-
-    This task act a gateway/middle-man between pre-processing and training.
-    '''
-
-    def run(self):
-        yield TrainAllModels(
-            data_files=[target.path for target in self.input()['data']],
-            label_files=[target.path for target in self.input()['labels']]
-        )
-
-
-class TrainAllModels(luigi.Task):
-    data_files = luigi.ListParameter()
-    label_files = luigi.ListParameter()
-
-    def model_tasks(self):
-        mfcc_spectrogram_cnn_models = []
-        for i in range(len(self.data_files)):
-            data_subset = self.data_files[:i] + self.data_files[i+1:]
-            labels_subset = self.label_files[:i] + self.label_files[i+1:]
-            for j in range(len(data_subset)):
-                model = ValidateMfccSpectrogramCNN(
-                    data_files=data_subset[:j+1],
-                    label_files=labels_subset[:j+1],
-                    validation_data=[self.data_files[i]],
-                    validation_labels=[self.label_files[i]],
-                )
-                mfcc_spectrogram_cnn_models.append(model)
-
-        return mfcc_spectrogram_cnn_models
-
-    def output(self):
-        return {task.requires().model_id: {**task.output(), **task.input()}
-                for task in self.model_tasks()}
-
-    def run(self):
-        yield self.model_tasks()
-
-
-class MfccSpectrogramCNN(luigi.Task):
-
-    '''Trains a CNN using MFCC spectrograms
+    '''Abstract base class for training Tensorflow models
 
     `data_files` and `label_files` must aligned such that the order of data
     matches the order of labels.
 
     '''
+
     data_files = luigi.ListParameter()
     label_files = luigi.ListParameter()
     downsample_rate = luigi.FloatParameter(default=1.0)
@@ -81,6 +39,14 @@ class MfccSpectrogramCNN(luigi.Task):
             'pb': luigi.LocalTarget(model_pb_path),
             'metadata': luigi.LocalTarget(metadata_path)
         }
+
+    @property
+    def model_class():
+        '''Returns callable object that is a model
+
+        Should be implemented as a static method
+        '''
+        raise NotImplementedError
 
     @property
     def model_id(self):
@@ -110,7 +76,7 @@ class MfccSpectrogramCNN(luigi.Task):
                 y.append(hf['data'][:])
         y = np.vstack(y)
 
-        ops = models.mfcc_spectrogram_cnn()
+        ops = self.model_class()()
 
         data_indices = np.arange(len(y))
         np.random.shuffle(data_indices)
@@ -123,6 +89,7 @@ class MfccSpectrogramCNN(luigi.Task):
         builder = tf.saved_model.builder.SavedModelBuilder(self.save_path)
         with tf.Session() as sess:
             sess.run(tf.global_variables_initializer())
+            ops = self.model_class()
 
             # Normally training is not done with a dropout set to 0 (i.e.,
             # keep_prob=1.0), but we only need to check that the model is
@@ -154,10 +121,32 @@ class MfccSpectrogramCNN(luigi.Task):
             f.write(param_json)
 
 
-@luigi.util.requires(MfccSpectrogramCNN)
-class ValidateMfccSpectrogramCNN(luigi.Task):
+class MfccSpectrogramCNN(TrainTensorflowModel):
 
-    '''Validates MfccSpectrogramCNN
+    '''Trains a CNN using MFCC spectrograms
+
+    '''
+
+    @staticmethod
+    def model_class():
+        return models.mfcc_spectrogram_cnn
+
+
+class LogMelSpectrogramCNN(TrainTensorflowModel):
+
+    '''Trains a CNN using log Mel spectrograms
+
+    '''
+
+    @staticmethod
+    def model_class():
+        return models.log_mel_spectrogram_cnn
+
+
+@luigi.util.inherits(TrainTensorflowModel)
+class ValidateTensorflowModel(luigi.Task):
+
+    '''Validates TrainTensorflowModel
 
     '''
     validation_data = luigi.ListParameter()
@@ -224,3 +213,84 @@ class ValidateMfccSpectrogramCNN(luigi.Task):
                                   sort_keys=True)
         with self.output()['metrics'].open('w') as f:
             f.write(metrics_json)
+
+
+@luigi.util.requires(MfccSpectrogramCNN)
+class ValidateMfccSpectrogramCNN(ValidateTensorflowModel):
+
+    '''Validates MfccSpectrogramCNN
+
+    '''
+    pass
+
+
+@luigi.util.requires(LogMelSpectrogramCNN)
+class ValidateLogMelSpectrogramCNN(ValidateTensorflowModel):
+
+    '''Validates LogMelSpectrogramCNN
+
+    '''
+    pass
+
+
+@luigi.util.requires(data.DoDataPreProcessing)
+class InitiateTraining(luigi.Task):
+
+    '''Initiates training of all models
+
+    This task act a gateway/middle-man between pre-processing and training.
+    '''
+
+    def run(self):
+        yield TrainAllModels(
+            data_files=[target.path for target in self.input()['data']],
+            label_files=[target.path for target in self.input()['labels']]
+        )
+
+
+class TrainAllModels(luigi.Task):
+    data_files = luigi.ListParameter()
+    label_files = luigi.ListParameter()
+
+    validation_tasks = [ValidateMfccSpectrogramCNN,
+                        ValidateLogMelSpectrogramCNN]
+    train_all_data_task = [MfccSpectrogramCNN,
+                           LogMelSpectrogramCNN]
+
+    def model_tasks(self):
+        models = []
+        for i in range(len(self.data_files)):
+            data_subset = self.data_files[:i] + self.data_files[i+1:]
+            labels_subset = self.label_files[:i] + self.label_files[i+1:]
+            for j in range(len(data_subset)):
+                for task_class in self.validation_tasks:
+                    models.append(task_class(
+                        data_files=data_subset[:j+1],
+                        label_files=labels_subset[:j+1],
+                        validation_data=[self.data_files[i]],
+                        validation_labels=[self.label_files[i]],
+                    ))
+        for task_class in self.train_all_data_task:
+            models.append(task_class(
+                data_files=self.data_files,
+                label_files=self.label_files,
+            ))
+
+        return models
+
+    def output(self):
+        return {
+            (
+                task.requires().model_id
+                if isinstance(task, ValidateTensorflowModel)
+                else task.model_id
+            ): (
+                {**task.output(), **task.input()}
+                if isinstance(task, ValidateTensorflowModel)
+                else {**task.output()}
+            )
+            for task in self.model_tasks()
+        }
+
+    def run(self):
+        yield self.model_tasks()

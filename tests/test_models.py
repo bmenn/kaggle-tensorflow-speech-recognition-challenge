@@ -2,12 +2,20 @@
 
 '''
 import numpy as np
+import pytest
 import tensorflow as tf
 
 import tfspeech.models as models
 
 
-def test_mfcc_spectrogram_cnn():
+@pytest.mark.parametrize(
+    'model_class',
+    [
+        models.mfcc_spectrogram_cnn,
+        models.log_mel_spectrogram_cnn,
+    ]
+)
+def test_mfcc_spectrogram_cnn(model_class):
     '''Confirm that model is actually updating/training given data to catch
     embrassingly simple mistakes
 
@@ -18,13 +26,13 @@ def test_mfcc_spectrogram_cnn():
         's': 16000 * np.ones(shape=(5, 1)),
         'keep_prob': 1.0,
     }
-    ops = models.mfcc_spectrogram_cnn()
+    ops = model_class()
 
     feed_dict = {
         'training/wav_input:0': data['x'],
         'training/label:0': data['y'],
         'training/sample_rate:0': data['s'],
-        ops['keep_prob']: data['keep_prob']
+        'keep_probability:0': data['keep_prob']
     }
 
     with tf.Session() as sess:
