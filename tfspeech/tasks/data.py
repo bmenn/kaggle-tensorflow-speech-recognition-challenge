@@ -128,7 +128,7 @@ class ConvertWavToArray(luigi.Task):
 @luigi.util.requires(DataPartition)
 class ConvertFilenameToLabel(luigi.Task):
 
-    '''Encode filename labels to arrays of ints'''
+    '''Encode filename labels to one-hot arrays'''
 
     base_dir = luigi.Parameter(default='data')
 
@@ -153,7 +153,8 @@ class ConvertFilenameToLabel(luigi.Task):
             except KeyError:
                 labels.append(lookup['unknown'])
 
-        data = np.array(labels)
+        data = np.zeros((len(labels), len(LABELS)))
+        data[np.arange(len(labels)), labels] = 1
         with h5py.File(self.output().path, 'w') as hf:
             hf.create_dataset('data', data=data)
 

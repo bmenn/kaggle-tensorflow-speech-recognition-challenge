@@ -32,9 +32,15 @@ def max_pool_2x2(x):
 
 
 def mfcc_spectrogram_cnn():
-    x = tf.placeholder(tf.float32, shape=[None, SAMPLE_INPUT_LENGTH])
-    s = tf.placeholder(tf.int32, shape=[None, 1])
-    y_ = tf.placeholder(tf.float32, shape=[None, len(LABELS)])
+    # TODO: Add inference graph, see
+    # tensorflow/tensorflow/examples/speech_commands/freeze.py
+    with tf.variable_scope('training'):
+        x = tf.placeholder(tf.float32, shape=[None, SAMPLE_INPUT_LENGTH],
+                           name='wav_input')
+        s = tf.placeholder(tf.int32, shape=[None, 1],
+                           name='sample_rate')
+        y_ = tf.placeholder(tf.float32, shape=[None, len(LABELS)],
+                            name='label')
 
     # MFCC related code stolen from
     # https://tensorflow.org/api_guides/python/contrib.signal#Computing_spectrograms
@@ -81,17 +87,19 @@ def mfcc_spectrogram_cnn():
     h_pool2_flat = tf.reshape(h_pool2, [-1, flatten_size])
     h_fc1 = tf.nn.relu(tf.matmul(h_pool2_flat, W_fc1) + b_fc1)
 
-    keep_prob = tf.placeholder(tf.float32)
+    keep_prob = tf.placeholder(tf.float32, name='keep_probability')
     h_fc1_drop = tf.nn.dropout(h_fc1, keep_prob)
     W_fc2 = weight_variable([1024, len(LABELS)])
     b_fc2 = bias_variable([len(LABELS)])
 
     y_conv = tf.matmul(h_fc1_drop, W_fc2) + b_fc2
+    y_conv = tf.identity(y_conv, name='labels_softmax')
 
     cross_entropy = tf.reduce_mean(
         tf.nn.softmax_cross_entropy_with_logits(labels=y_, logits=y_conv))
-    train_step = tf.train.AdamOptimizer(1e-4).minimize(cross_entropy)
-    prediction = tf.equal(tf.argmax(y_conv, 1), tf.argmax(y_, 1))
+    train_step = tf.train.AdamOptimizer(1e-4).minimize(cross_entropy,
+                                                       name='train_step')
+    prediction = tf.argmax(y_conv, 1, name='predict')
 
     return {
         'train_step': train_step,
