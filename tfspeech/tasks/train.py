@@ -72,7 +72,7 @@ class TrainTensorflowModel(luigi.Task):
 
     @property
     def checkpoint_path(self):
-        return self.save_path + '.ckpt'
+        return self.save_path + '_checkpoint/model.ckpt'
 
     def build_graph(self, num_samples):
         return self.model_class()()
@@ -107,8 +107,6 @@ class TrainTensorflowModel(luigi.Task):
         with tf.Session() as sess:
             sess.run(tf.global_variables_initializer())
             ckpt = tf.train.get_checkpoint_state(os.path.split(self.checkpoint_path)[0])
-            # FIXME This checkpoint check only works if only one model
-            # (which also the current one) has been checkpointed
             if ckpt and ckpt.model_checkpoint_path:
                 saver.restore(sess, self.checkpoint_path)
                 global_step = tf.train.get_or_create_global_step()
@@ -150,13 +148,13 @@ class TrainTensorflowModel(luigi.Task):
                         start_index += self.batch_size
 
                     if i % 1000 == 0:
-                        saver.save(sess, self.save_path + '.ckpt')
+                        saver.save(sess, self.checkpoint_path)
                         LOGGER.info('Model %s training progress: %d/%d' %
                                     (self.model_id, i, steps))
             except KeyboardInterrupt as e:
                 LOGGER.info('Stopping model %s, training progress: %d/%d' %
                             (self.model_id, i, steps))
-                saver.save(sess, self.save_path + '.ckpt')
+                saver.save(sess, self.checkpoint_path)
                 writer.flush()
                 raise e
 
