@@ -297,13 +297,12 @@ def log_mel_spectrogram_resnet(resnet_size, batch_size,
             lambda: tf.no_op(),
         )
 
-    accuracy = tf.metrics.accuracy(
-        tf.argmax(y_, axis=1), predictions['classes'])
-    metrics = {'accuracy': accuracy}
-
-    # Create a tensor named train_accuracy for logging purposes.
-    tf.identity(accuracy[1], name='train_accuracy')
-    tf.summary.scalar('train_accuracy', accuracy[1])
+    with tf.name_scope('train_metrics'):
+        correct_prediction = tf.equal(predictions['classes'], tf.argmax(y_, 1))
+        accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32),
+                                  name='accuracy')
+        # Create a tensor named train_accuracy for logging purposes.
+        tf.summary.scalar('train_accuracy', accuracy)
 
     return {
         'train_step': train_op,

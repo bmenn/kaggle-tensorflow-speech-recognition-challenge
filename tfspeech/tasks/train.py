@@ -3,6 +3,7 @@
 '''
 import hashlib
 import json
+import logging
 import os
 
 import h5py
@@ -13,6 +14,12 @@ import tensorflow as tf
 import tfspeech.models as models
 import tfspeech.tasks.data as data
 
+LOGGER = logging.getLogger(__name__)
+LOGGER.setLevel(logging.INFO)
+_sh = logging.StreamHandler()
+_formatter = logging.Formatter('%(asctime)-15s %(message)s')
+_sh.setFormatter(_formatter)
+LOGGER.addHandler(_sh)
 
 class TrainTensorflowModel(luigi.Task):
 
@@ -63,6 +70,10 @@ class TrainTensorflowModel(luigi.Task):
     def save_path(self):
         return 'data/models/' + self.model_id
 
+    @property
+    def checkpoint_path(self):
+        return self.save_path + '.ckpt'
+
     def build_graph(self, num_samples):
         return self.model_class()()
 
@@ -85,44 +96,72 @@ class TrainTensorflowModel(luigi.Task):
 
         ops = self.build_graph(len(y))
 
+        merged = tf.summary.merge_all()
+        writer = tf.summary.FileWriter('tflogs/' + self.model_id)
         steps = int(self.num_epochs * len(y) / self.batch_size)
         # TODO: Need to implement some kind of atomic like behavior similar
         # to Target classes. Otherwise, if the save path exists the builder
         # with fail to instantiate.
-        builder = tf.saved_model.builder.SavedModelBuilder(self.save_path)
+        saver = tf.train.Saver()
+        initial_step = 0
         with tf.Session() as sess:
             sess.run(tf.global_variables_initializer())
+            ckpt = tf.train.get_checkpoint_state(os.path.split(self.checkpoint_path)[0])
+            # FIXME This checkpoint check only works if only one model
+            # (which also the current one) has been checkpointed
+            if ckpt and ckpt.model_checkpoint_path:
+                saver.restore(sess, self.checkpoint_path)
+                global_step = tf.train.get_or_create_global_step()
+                initial_step = sess.run(global_step)
+
+            try:
+                for i in range(initial_step, steps):
+                    if start_index + self.batch_size > len(y):
+                        np.random.shuffle(data_indices)
+                        start_index = 0
+                    stop_index = start_index + self.batch_size
+                    feed_dict = {
+                        'training/wav_input:0': x[start_index:stop_index],
+                        'training/label:0': y[start_index:stop_index],
+                        'training/sample_rate:0': 16000 * np.ones((self.batch_size, 1)),
+                    }
+                    try:
+                        sess.graph.get_operation_by_name('keep_probability')
+                        feed_dict.update({'keep_probability:0': 1.0 - self.dropout_rate})
+                    except KeyError:
+                        pass
+                    try:
+                        sess.graph.get_operation_by_name('is_training')
+                        feed_dict.update({'is_training:0': True})
+                    except KeyError:
+                        pass
+
+                    if i % 10 == 0:
+                        summary, _, __ = sess.run(
+                            [merged, 'train_step', 'train_metrics/accuracy'],
+                            feed_dict=feed_dict
+                        )
+                        writer.add_summary(summary, i)
+                    else:
+                        sess.run(
+                            'train_step',
+                            feed_dict=feed_dict
+                        )
+                        start_index += self.batch_size
+
+                    if i % 1000 == 0:
+                        saver.save(sess, self.save_path + '.ckpt')
+                        LOGGER.info('Model %s training progress: %d/%d' %
+                                    (self.model_id, i, steps))
+            except KeyboardInterrupt as e:
+                LOGGER.info('Stopping model %s, training progress: %d/%d' %
+                            (self.model_id, i, steps))
+                saver.save(sess, self.save_path + '.ckpt')
+                writer.flush()
+                raise e
 
 
-            # Normally training is not done with a dropout set to 0 (i.e.,
-            # keep_prob=1.0), but we only need to check that the model is
-            # updating.
-            for _ in range(steps):
-                if start_index + self.batch_size > len(y):
-                    np.random.shuffle(data_indices)
-                    start_index = 0
-                stop_index = start_index + self.batch_size
-                feed_dict = {
-                    'training/wav_input:0': x[start_index:stop_index],
-                    'training/label:0': y[start_index:stop_index],
-                    'training/sample_rate:0': 16000 * np.ones((self.batch_size, 1)),
-                }
-                try:
-                    sess.graph.get_operation_by_name('keep_probability')
-                    feed_dict.update({'keep_probability:0': 1.0 - self.dropout_rate})
-                except KeyError:
-                    pass
-                try:
-                    sess.graph.get_operation_by_name('is_training')
-                    feed_dict.update({'is_training:0': True})
-                except KeyError:
-                    pass
-                sess.run(
-                    'train_step',
-                    feed_dict=feed_dict
-                )
-                start_index += self.batch_size
-
+            builder = tf.saved_model.builder.SavedModelBuilder(self.save_path)
             builder.add_meta_graph_and_variables(sess, ['model',
                                                         self.model_id])
 
@@ -172,6 +211,8 @@ class LogMelSpectrogramResNet(TrainParametrizedTensorflowModel):
     '''Trains a ResNet using log Mel spectrograms
 
     '''
+    batch_size = luigi.IntParameter(default=256)
+    num_epochs = luigi.IntParameter(default=120)
 
     @staticmethod
     def model_class():
@@ -291,7 +332,9 @@ class ValidateLogMelSpectrogramResNet(ValidateTensorflowModel):
     '''Validates LogMelSpectrogramResNet
 
     '''
-    pass
+
+    batch_size = luigi.IntParameter(default=256)
+    num_epochs = luigi.IntParameter(default=120)
 
 
 @luigi.util.requires(data.DoDataPreProcessing)
@@ -324,7 +367,7 @@ class TrainAllModels(luigi.Task):
     model_settings = [
         None,
         None,
-        {'resnet_size': 50}
+        {'resnet_size': 18}
     ]
 
     def model_tasks(self):
