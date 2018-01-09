@@ -29,7 +29,6 @@ def test_mfcc_spectrogram_cnn(model_class, model_config):
         's': 16000 * np.ones(shape=(5, 1)),
         'keep_prob': 1.0,
     }
-    ops = model_class(**model_config)
 
     feed_dict = {
         'training/wav_input:0': data['x'],
@@ -38,7 +37,8 @@ def test_mfcc_spectrogram_cnn(model_class, model_config):
     }
 
 
-    with tf.Session() as sess:
+    with tf.Session(graph=tf.Graph()) as sess:
+        ops = model_class(**model_config)
         sess.run(tf.global_variables_initializer())
 
         try:
@@ -47,8 +47,8 @@ def test_mfcc_spectrogram_cnn(model_class, model_config):
         except KeyError:
             pass
         try:
-            sess.graph.get_operation_by_name('is_training')
-            feed_dict.update({'is_training:0': False})
+            sess.graph.get_operation_by_name('training/is_training')
+            feed_dict.update({'training/is_training:0': False})
         except KeyError:
             pass
 
@@ -59,16 +59,16 @@ def test_mfcc_spectrogram_cnn(model_class, model_config):
         # keep_prob=1.0), but we only need to check that the model is
         # updating.
         try:
-            sess.graph.get_operation_by_name('is_training')
-            feed_dict.update({'is_training:0': True})
+            sess.graph.get_operation_by_name('training/is_training')
+            feed_dict.update({'training/is_training:0': True})
         except KeyError:
             pass
         for _ in range(100):
             sess.run('train_step', feed_dict=feed_dict)
 
         try:
-            sess.graph.get_operation_by_name('is_training')
-            feed_dict.update({'is_training:0': False})
+            sess.graph.get_operation_by_name('training/is_training')
+            feed_dict.update({'training/is_training:0': False})
         except KeyError:
             pass
         prediction_final = sess.run('predict:0',

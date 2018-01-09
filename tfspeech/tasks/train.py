@@ -94,17 +94,21 @@ class TrainTensorflowModel(luigi.Task):
         np.random.shuffle(data_indices)
         start_index = 0
 
-        ops = self.build_graph(len(y))
 
-        merged = tf.summary.merge_all()
-        writer = tf.summary.FileWriter('tflogs/' + self.model_id)
-        steps = int(self.num_epochs * len(y) / self.batch_size)
-        # TODO: Need to implement some kind of atomic like behavior similar
-        # to Target classes. Otherwise, if the save path exists the builder
-        # with fail to instantiate.
-        saver = tf.train.Saver()
+        graph = tf.Graph()
+        with graph.as_default():
+            ops = self.build_graph(len(y))
+            merged = tf.summary.merge_all()
+            writer = tf.summary.FileWriter('tflogs/' + self.model_id)
+            steps = int(self.num_epochs * len(y) / self.batch_size)
+            # TODO: Need to implement some kind of atomic like behavior similar
+            # to Target classes. Otherwise, if the save path exists the builder
+            # with fail to instantiate.
+            saver = tf.train.Saver()
+
         initial_step = 0
-        with tf.Session() as sess:
+        with tf.Session(graph=graph) as sess:
+
             ckpt = tf.train.get_checkpoint_state(os.path.split(self.checkpoint_path)[0])
             if ckpt and ckpt.model_checkpoint_path:
                 saver.restore(sess, self.checkpoint_path)
@@ -209,8 +213,8 @@ class LogMelSpectrogramResNet(TrainParametrizedTensorflowModel):
     '''Trains a ResNet using log Mel spectrograms
 
     '''
-    batch_size = luigi.IntParameter(default=128)
-    num_epochs = luigi.IntParameter(default=250)
+    batch_size = luigi.IntParameter(default=512)
+    num_epochs = luigi.IntParameter(default=150)
 
     @staticmethod
     def model_class():
@@ -246,6 +250,18 @@ class ValidateTensorflowModel(luigi.Task):
         }
 
     def run(self):
+        train_x = []
+        for data_file in self.data_files:
+            with h5py.File(data_file, 'r') as hf:
+                train_x.append(hf['data'][:])
+        train_x = np.vstack(train_x)
+
+        train_y = []
+        for label_file in self.label_files:
+            with h5py.File(label_file, 'r') as hf:
+                train_y.append(hf['data'][:])
+        train_y = np.vstack(train_y)
+
         x = []
         for data_file in self.validation_data:
             with h5py.File(data_file, 'r') as hf:
@@ -258,8 +274,7 @@ class ValidateTensorflowModel(luigi.Task):
                 y.append(hf['data'][:])
         y = np.vstack(y)
 
-
-        with tf.Session() as sess:
+        with tf.Session(graph=tf.Graph()) as sess:
             tf.saved_model.loader.load(
                 sess,
                 ['model', self.requires().model_id],
@@ -291,14 +306,40 @@ class ValidateTensorflowModel(luigi.Task):
                     feed_dict=feed_dict
                 ))
 
+            train_predictions = []
+            for i in range(0, len(train_y), 1024):
+                feed_dict = {
+                    'training/wav_input:0': train_x[i:i+1024],
+                    'training/label:0': train_y[i:i+1024],
+                    'training/sample_rate:0': 16000 * np.ones((len(train_y[i:i+1024]), 1)),
+                }
+                try:
+                    sess.graph.get_operation_by_name('keep_probability')
+                    feed_dict.update({'keep_probability:0': 1.0})
+                except KeyError:
+                    pass
+                try:
+                    sess.graph.get_operation_by_name('training/is_training')
+                    feed_dict.update({'training/is_training:0': False})
+                except KeyError:
+                    pass
+                train_predictions.append(sess.run(
+                    'predict:0',
+                    feed_dict=feed_dict
+                ))
+
         predictions = np.concatenate(predictions).reshape((-1, 1))
         y_labels = np.argmax(y, axis=1).reshape((-1, 1))
         prediction_labels = np.hstack([predictions, y_labels])
         with h5py.File(self.output()['predictions'].path, 'w') as hf:
             hf.create_dataset('data', data=prediction_labels)
 
+        train_predictions = np.concatenate(train_predictions).reshape((-1, 1))
+        train_y_labels = np.argmax(train_y, axis=1).reshape((-1, 1))
+
         metrics = {
-            'accuracy': np.sum(np.equal(predictions, y_labels)) / len(y_labels)
+            'accuracy': np.sum(np.equal(predictions, y_labels)) / len(y_labels),
+            'train_accuracy': np.sum(np.equal(train_predictions, train_y_labels)) / len(train_y_labels)
         }
         metrics_json = json.dumps(metrics, separators=(',', ':'),
                                   sort_keys=True)
@@ -331,8 +372,8 @@ class ValidateLogMelSpectrogramResNet(ValidateTensorflowModel):
 
     '''
 
-    batch_size = luigi.IntParameter(default=128)
-    num_epochs = luigi.IntParameter(default=250)
+    batch_size = luigi.IntParameter(default=512)
+    num_epochs = luigi.IntParameter(default=150)
 
 
 @luigi.util.requires(data.DoDataPreProcessing)

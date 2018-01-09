@@ -272,22 +272,28 @@ def log_mel_spectrogram_resnet(resnet_size, batch_size,
     # is 128, the learning rate should be 0.1.
     #
     # Increasing rate to try to help with convergence
-    initial_learning_rate = 0.1 * batch_size / 128
+    initial_learning_rate = 0.1
     batches_per_epoch = num_training_samples / batch_size
 
     # Multiply the learning rate by 0.1 at 30, 60, 80, and 90 epochs.
-    boundaries = [int(batches_per_epoch * epoch) for epoch in [25, 50, 75]]
-    values = [initial_learning_rate * decay for decay in [1, 0.1, 0.01, 0.001]]
-    learning_rate = tf.train.piecewise_constant(
-        tf.cast(global_step, tf.int32), boundaries, values)
+    # boundaries = [int(batches_per_epoch * epoch) for epoch in [25, 50, 75]]
+    # values = [initial_learning_rate * decay for decay in [1, 0.1, 0.01, 0.001]]
+    # learning_rate = tf.train.piecewise_constant(
+    #     tf.cast(global_step, tf.int32), boundaries, values)
+    learning_rate = tf.train.exponential_decay(initial_learning_rate,
+                                               global_step,
+                                               batches_per_epoch,
+                                               0.95)
 
     # Create a tensor named learning_rate for logging purposes.
     tf.identity(learning_rate, name='learning_rate')
     tf.summary.scalar('learning_rate', learning_rate)
 
-    optimizer = tf.train.MomentumOptimizer(
-        learning_rate=learning_rate,
-        momentum=_MOMENTUM)
+    # optimizer = tf.train.MomentumOptimizer(
+    #     learning_rate=learning_rate,
+    #     momentum=_MOMENTUM)
+    optimizer = tf.train.GradientDescentOptimizer(
+        learning_rate=learning_rate)
 
     # Batch norm requires update_ops to be added as a train_op dependency.
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
