@@ -49,7 +49,7 @@ class GenerateModelTestPredictions(luigi.Task):
         with h5py.File(self.input()['test_data']['data'].path, 'r') as hf:
             x = hf['data'][:]
 
-        with tf.Session() as sess:
+        with tf.Session(graph=tf.Graph()) as sess:
             tf.saved_model.loader.load(
                 sess,
                 ['model', self.model_id],
@@ -64,8 +64,17 @@ class GenerateModelTestPredictions(luigi.Task):
                 feed_dict = {
                     'training/wav_input:0': x[i:i+1024],
                     'training/sample_rate:0': 16000 * np.ones((len(x[i:i+1024]), 1)),
-                    'keep_probability:0': 1,
                 }
+                try:
+                    sess.graph.get_operation_by_name('keep_probability')
+                    feed_dict.update({'keep_probability:0': 1.0})
+                except KeyError:
+                    pass
+                try:
+                    sess.graph.get_operation_by_name('training/is_training')
+                    feed_dict.update({'training/is_training:0': False})
+                except KeyError:
+                    pass
                 predictions.append(sess.run(
                     'predict:0',
                     feed_dict=feed_dict

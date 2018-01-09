@@ -139,8 +139,18 @@ class TrainTensorflowModel(luigi.Task):
                         pass
 
                     if i % 10 == 0:
-                        summary, _, __ = sess.run(
-                            [merged, 'train_step', 'train_metrics/accuracy'],
+                        sess.run(
+                            'train_step',
+                            feed_dict=feed_dict
+                        )
+                        try:
+                            sess.graph.get_operation_by_name('training/is_training')
+                            feed_dict.update({'training/is_training:0':
+                                              False})
+                        except KeyError:
+                            pass
+                        summary, _ = sess.run(
+                            [merged, 'train_metrics/accuracy'],
                             feed_dict=feed_dict
                         )
                         writer.add_summary(summary, i)
@@ -213,8 +223,8 @@ class LogMelSpectrogramResNet(TrainParametrizedTensorflowModel):
     '''Trains a ResNet using log Mel spectrograms
 
     '''
-    batch_size = luigi.IntParameter(default=512)
-    num_epochs = luigi.IntParameter(default=150)
+    batch_size = luigi.IntParameter(default=128)
+    num_epochs = luigi.IntParameter(default=250)
 
     @staticmethod
     def model_class():
@@ -372,8 +382,8 @@ class ValidateLogMelSpectrogramResNet(ValidateTensorflowModel):
 
     '''
 
-    batch_size = luigi.IntParameter(default=512)
-    num_epochs = luigi.IntParameter(default=150)
+    batch_size = luigi.IntParameter(default=128)
+    num_epochs = luigi.IntParameter(default=250)
 
 
 @luigi.util.requires(data.DoDataPreProcessing)
