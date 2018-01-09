@@ -105,12 +105,12 @@ class TrainTensorflowModel(luigi.Task):
         saver = tf.train.Saver()
         initial_step = 0
         with tf.Session() as sess:
-            sess.run(tf.global_variables_initializer())
             ckpt = tf.train.get_checkpoint_state(os.path.split(self.checkpoint_path)[0])
             if ckpt and ckpt.model_checkpoint_path:
                 saver.restore(sess, self.checkpoint_path)
                 global_step = tf.train.get_or_create_global_step()
                 initial_step = sess.run(global_step)
+            sess.run(tf.global_variables_initializer())
 
             try:
                 for i in range(initial_step, steps):
@@ -129,8 +129,8 @@ class TrainTensorflowModel(luigi.Task):
                     except KeyError:
                         pass
                     try:
-                        sess.graph.get_operation_by_name('is_training')
-                        feed_dict.update({'is_training:0': True})
+                        sess.graph.get_operation_by_name('training/is_training')
+                        feed_dict.update({'training/is_training:0': True})
                     except KeyError:
                         pass
 
@@ -209,8 +209,8 @@ class LogMelSpectrogramResNet(TrainParametrizedTensorflowModel):
     '''Trains a ResNet using log Mel spectrograms
 
     '''
-    batch_size = luigi.IntParameter(default=256)
-    num_epochs = luigi.IntParameter(default=120)
+    batch_size = luigi.IntParameter(default=128)
+    num_epochs = luigi.IntParameter(default=250)
 
     @staticmethod
     def model_class():
@@ -282,8 +282,8 @@ class ValidateTensorflowModel(luigi.Task):
                 except KeyError:
                     pass
                 try:
-                    sess.graph.get_operation_by_name('is_training')
-                    feed_dict.update({'is_training:0': False})
+                    sess.graph.get_operation_by_name('training/is_training')
+                    feed_dict.update({'training/is_training:0': False})
                 except KeyError:
                     pass
                 predictions.append(sess.run(
@@ -331,8 +331,8 @@ class ValidateLogMelSpectrogramResNet(ValidateTensorflowModel):
 
     '''
 
-    batch_size = luigi.IntParameter(default=256)
-    num_epochs = luigi.IntParameter(default=120)
+    batch_size = luigi.IntParameter(default=128)
+    num_epochs = luigi.IntParameter(default=250)
 
 
 @luigi.util.requires(data.DoDataPreProcessing)
@@ -365,7 +365,7 @@ class TrainAllModels(luigi.Task):
     model_settings = [
         None,
         None,
-        {'resnet_size': 18}
+        {'resnet_size': 20}
     ]
 
     def model_tasks(self):

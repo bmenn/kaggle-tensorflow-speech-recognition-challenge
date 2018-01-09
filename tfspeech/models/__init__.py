@@ -207,7 +207,7 @@ def log_mel_spectrogram_resnet(resnet_size, batch_size,
                            name='sample_rate')
         y_ = tf.placeholder(tf.float32, shape=[None, len(LABELS)],
                             name='label')
-    is_training = tf.placeholder(tf.bool, name='is_training')
+        is_training = tf.placeholder(tf.bool, name='is_training')
     global_step = tf.train.get_or_create_global_step()
 
     # MFCC related code stolen from
@@ -239,11 +239,13 @@ def log_mel_spectrogram_resnet(resnet_size, batch_size,
         [-1, image_size[0], image_size[1], 1])
     log_mel_channels = tf.image.resize_images(
         log_mel_channels,
-        size=(224, 224))
+        size=(32, 32))
 
     # Much of what is below is copied from imagenet_main.py (which is from
     # Tensorflow official models
-    network = resnet_model.imagenet_resnet_v2(
+    #
+    # Using CIFAR-10 model, data size matches more closely to this situation
+    network = resnet_model.cifar10_resnet_v2_generator(
         resnet_size, len(LABELS) + 0)
     logits = network(inputs=log_mel_channels,
                      is_training=is_training)
@@ -267,15 +269,15 @@ def log_mel_spectrogram_resnet(resnet_size, batch_size,
          if 'batch_normalization' not in v.name])
 
     # Scale the learning rate linearly with the batch size. When the batch size
-    # is 256, the learning rate should be 0.1.
-    initial_learning_rate = 0.1 * batch_size / 256
+    # is 128, the learning rate should be 0.1.
+    #
+    # Increasing rate to try to help with convergence
+    initial_learning_rate = 0.1 * batch_size / 128
     batches_per_epoch = num_training_samples / batch_size
 
     # Multiply the learning rate by 0.1 at 30, 60, 80, and 90 epochs.
-    boundaries = [
-        int(batches_per_epoch * epoch) for epoch in [30, 60, 80, 90]]
-    values = [
-        initial_learning_rate * decay for decay in [1, 0.1, 0.01, 1e-3, 1e-4]]
+    boundaries = [int(batches_per_epoch * epoch) for epoch in [25, 50, 75]]
+    values = [initial_learning_rate * decay for decay in [1, 0.1, 0.01, 0.001]]
     learning_rate = tf.train.piecewise_constant(
         tf.cast(global_step, tf.int32), boundaries, values)
 
