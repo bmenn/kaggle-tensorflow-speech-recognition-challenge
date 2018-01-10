@@ -24,7 +24,7 @@ def test_mfcc_spectrogram_cnn(model_class, model_config):
 
     '''
     data = {
-        'x': np.random.rand(5, 16000),
+        'x': np.eye(5, 16000),
         'y': np.eye(5, 12),
         's': 16000 * np.ones(shape=(5, 1)),
         'keep_prob': 1.0,
@@ -63,7 +63,7 @@ def test_mfcc_spectrogram_cnn(model_class, model_config):
             feed_dict.update({'training/is_training:0': True})
         except KeyError:
             pass
-        for _ in range(100):
+        for _ in range(1000):
             sess.run('train_step', feed_dict=feed_dict)
 
         try:

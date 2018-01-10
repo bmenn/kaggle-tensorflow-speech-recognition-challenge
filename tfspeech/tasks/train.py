@@ -186,6 +186,7 @@ class TrainTensorflowModel(luigi.Task):
                         pass
 
                     if i % steps_per_epoch == 0:
+                        # Benchmark at beginning of each epoch
                         saver.save(sess, self.checkpoint_path)
                         LOGGER.info('Model %s training progress: %d/%d' %
                                     (self.model_id, i, steps))
@@ -198,8 +199,6 @@ class TrainTensorflowModel(luigi.Task):
                                     simple_value=v
                                     )
                                 writer.add_summary(summary, i)
-
-                    if i % int(steps_per_epoch / 20) == 0:
                         metrics = self._metrics(sess, x, y)
                         if metrics is not None:
                             for k, v in metrics.items():
@@ -209,6 +208,7 @@ class TrainTensorflowModel(luigi.Task):
                                     simple_value=v
                                     )
                                 writer.add_summary(summary, i)
+
                         summary, _ = sess.run(
                             [merged, 'train_step'],
                             feed_dict=feed_dict

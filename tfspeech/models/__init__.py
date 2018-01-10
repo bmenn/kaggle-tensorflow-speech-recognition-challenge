@@ -35,6 +35,50 @@ def max_pool_2x2(x):
     return tf.nn.max_pool(x, ksize=[1, 2, 2, 1],
                           strides=[1, 2, 2, 1], padding='SAME')
 
+def input_tensors():
+    with tf.variable_scope('training'):
+        x = tf.placeholder(tf.float32, shape=[None, SAMPLE_INPUT_LENGTH],
+                           name='wav_input')
+        s = tf.placeholder(tf.int32, shape=[None, 1],
+                           name='sample_rate')
+        y_ = tf.placeholder(tf.float32, shape=[None, len(LABELS)],
+                            name='label')
+        is_training = tf.placeholder(tf.bool, name='is_training')
+    return {
+        'wav_input': x,
+        'sample_rate': s,
+        'label': y_,
+        'is_training': is_training,
+    }
+
+
+def log_mel_spectrogram(x, s, frame_length=128, frame_step=64,
+                        fft_length=1024, lower_hertz=80.0,
+                        upper_hertz=7600.0, num_mel_bins=64):
+    # MFCC related code stolen from
+    # https://tensorflow.org/api_guides/python/contrib.signal#Computing_spectrograms
+    stfts = tf.contrib.signal.stft(x, frame_length=frame_length,
+                                   frame_step=frame_step,
+                                   fft_length=fft_length)
+    magnitude_spectrograms = tf.abs(stfts)
+
+    num_spectrograms_bins = magnitude_spectrograms.shape[-1].value
+
+    # TODO Ideally SAMPLE_RATE would be a tensor, `s`, instead of a constant
+    linear_to_mel_weight_matrix = tf.contrib.signal.linear_to_mel_weight_matrix(
+        num_mel_bins, num_spectrograms_bins, SAMPLE_RATE,
+        lower_hertz, upper_hertz
+    )
+
+    mel_spectrograms = tf.tensordot(magnitude_spectrograms,
+                                    linear_to_mel_weight_matrix, 1)
+    mel_spectrograms.set_shape(
+        magnitude_spectrograms.shape[:-1].concatenate(
+            linear_to_mel_weight_matrix.shape[-1:]))
+
+    log_offset = 1e-6
+    return tf.log(mel_spectrograms + log_offset)
+
 
 def mfcc_spectrogram_cnn():
     # TODO: Add inference graph, see
@@ -47,27 +91,7 @@ def mfcc_spectrogram_cnn():
         y_ = tf.placeholder(tf.float32, shape=[None, len(LABELS)],
                             name='label')
 
-    # MFCC related code stolen from
-    # https://tensorflow.org/api_guides/python/contrib.signal#Computing_spectrograms
-    stfts = tf.contrib.signal.stft(x, frame_length=256, frame_step=128,
-                                   fft_length=1024)
-    magnitude_spectrograms = tf.abs(stfts)
-
-    num_spectrograms_bins = magnitude_spectrograms.shape[-1].value
-    lower_edge_hertz, upper_edge_hertz, num_mel_bins = 80.0, 7600.0, 64
-    linear_to_mel_weight_matrix = tf.contrib.signal.linear_to_mel_weight_matrix(
-        num_mel_bins, num_spectrograms_bins, SAMPLE_RATE,
-        lower_edge_hertz, upper_edge_hertz
-    )
-
-    mel_spectrograms = tf.tensordot(magnitude_spectrograms,
-                                    linear_to_mel_weight_matrix, 1)
-    mel_spectrograms.set_shape(
-        magnitude_spectrograms.shape[:-1].concatenate(
-            linear_to_mel_weight_matrix.shape[-1:]))
-
-    log_offset = 1e-6
-    log_mel_spectrograms = tf.log(mel_spectrograms + log_offset)
+    log_mel_spectrograms = log_mel_spectrogram(x, s)
     num_mfccs = 13
     mfccs = tf.contrib.signal.mfccs_from_log_mel_spectrograms(
         log_mel_spectrograms)[..., :num_mfccs]
@@ -127,27 +151,7 @@ def log_mel_spectrogram_cnn():
         y_ = tf.placeholder(tf.float32, shape=[None, len(LABELS)],
                             name='label')
 
-    # MFCC related code stolen from
-    # https://tensorflow.org/api_guides/python/contrib.signal#Computing_spectrograms
-    stfts = tf.contrib.signal.stft(x, frame_length=256, frame_step=128,
-                                   fft_length=1024)
-    magnitude_spectrograms = tf.abs(stfts)
-
-    num_spectrograms_bins = magnitude_spectrograms.shape[-1].value
-    lower_edge_hertz, upper_edge_hertz, num_mel_bins = 80.0, 7600.0, 64
-    linear_to_mel_weight_matrix = tf.contrib.signal.linear_to_mel_weight_matrix(
-        num_mel_bins, num_spectrograms_bins, SAMPLE_RATE,
-        lower_edge_hertz, upper_edge_hertz
-    )
-
-    mel_spectrograms = tf.tensordot(magnitude_spectrograms,
-                                    linear_to_mel_weight_matrix, 1)
-    mel_spectrograms.set_shape(
-        magnitude_spectrograms.shape[:-1].concatenate(
-            linear_to_mel_weight_matrix.shape[-1:]))
-
-    log_offset = 1e-6
-    log_mel_spectrograms = tf.log(mel_spectrograms + log_offset)
+    log_mel_spectrograms = log_mel_spectrogram(x, s)
 
     image_size = [log_mel_spectrograms.shape[-2].value,
                   log_mel_spectrograms.shape[-1].value]
@@ -194,43 +198,18 @@ def log_mel_spectrogram_cnn():
     }
 
 
-# TODO: Need to understand what the resnet_size and num_mel_bins parameters
-# does
 def log_mel_spectrogram_resnet(resnet_size, batch_size,
                                num_training_samples):
     # TODO: Add inference graph, see
     # tensorflow/tensorflow/examples/speech_commands/freeze.py
-    with tf.variable_scope('training'):
-        x = tf.placeholder(tf.float32, shape=[None, SAMPLE_INPUT_LENGTH],
-                           name='wav_input')
-        s = tf.placeholder(tf.int32, shape=[None, 1],
-                           name='sample_rate')
-        y_ = tf.placeholder(tf.float32, shape=[None, len(LABELS)],
-                            name='label')
-        is_training = tf.placeholder(tf.bool, name='is_training')
+    inputs = input_tensors()
+    x = inputs['wav_input']
+    s = inputs['sample_rate']
+    y_ = inputs['label']
+    is_training = inputs['is_training']
     global_step = tf.train.get_or_create_global_step()
 
-    # MFCC related code stolen from
-    # https://tensorflow.org/api_guides/python/contrib.signal#Computing_spectrograms
-    stfts = tf.contrib.signal.stft(x, frame_length=128, frame_step=64,
-                                   fft_length=1024)
-    magnitude_spectrograms = tf.abs(stfts)
-
-    num_spectrograms_bins = magnitude_spectrograms.shape[-1].value
-    lower_edge_hertz, upper_edge_hertz, num_mel_bins = 80.0, 7600.0, 64
-    linear_to_mel_weight_matrix = tf.contrib.signal.linear_to_mel_weight_matrix(
-        num_mel_bins, num_spectrograms_bins, SAMPLE_RATE,
-        lower_edge_hertz, upper_edge_hertz
-    )
-
-    mel_spectrograms = tf.tensordot(magnitude_spectrograms,
-                                    linear_to_mel_weight_matrix, 1)
-    mel_spectrograms.set_shape(
-        magnitude_spectrograms.shape[:-1].concatenate(
-            linear_to_mel_weight_matrix.shape[-1:]))
-
-    log_offset = 1e-6
-    log_mel_spectrograms = tf.log(mel_spectrograms + log_offset)
+    log_mel_spectrograms = log_mel_spectrogram(x, s)
 
     image_size = [log_mel_spectrograms.shape[-2].value,
                   log_mel_spectrograms.shape[-1].value]
@@ -270,8 +249,6 @@ def log_mel_spectrogram_resnet(resnet_size, batch_size,
 
     # Scale the learning rate linearly with the batch size. When the batch size
     # is 128, the learning rate should be 0.1.
-    #
-    # Increasing rate to try to help with convergence
     initial_learning_rate = 0.1 * batch_size / 128
     batches_per_epoch = num_training_samples / batch_size
 
@@ -280,10 +257,6 @@ def log_mel_spectrogram_resnet(resnet_size, batch_size,
     values = [initial_learning_rate * decay for decay in [1, 0.1, 0.01, 0.001]]
     learning_rate = tf.train.piecewise_constant(
         tf.cast(global_step, tf.int32), boundaries, values)
-    # learning_rate = tf.train.exponential_decay(initial_learning_rate,
-    #                                            global_step,
-    #                                            batches_per_epoch,
-    #                                            0.95)
 
     # Create a tensor named learning_rate for logging purposes.
     tf.identity(learning_rate, name='learning_rate')
@@ -292,8 +265,6 @@ def log_mel_spectrogram_resnet(resnet_size, batch_size,
     optimizer = tf.train.MomentumOptimizer(
         learning_rate=learning_rate,
         momentum=_MOMENTUM)
-    # optimizer = tf.train.GradientDescentOptimizer(
-    #     learning_rate=learning_rate)
 
     # Batch norm requires update_ops to be added as a train_op dependency.
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
