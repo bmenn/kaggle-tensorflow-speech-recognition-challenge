@@ -297,20 +297,13 @@ def log_mel_spectrogram_resnet(resnet_size, batch_size,
 
     # Batch norm requires update_ops to be added as a train_op dependency.
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-    minimize = optimizer.minimize(loss, global_step, name='train_step')
     with tf.control_dependencies(update_ops):
-        train_op = tf.cond(
-            is_training,
-            lambda: minimize,
-            lambda: tf.no_op(),
-        )
+        train_op = optimizer.minimize(loss, global_step, name='train_step')
 
     with tf.name_scope('train_metrics'):
         correct_prediction = tf.equal(predictions['classes'], tf.argmax(y_, 1))
         accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32),
                                   name='accuracy')
-        # Create a tensor named train_accuracy for logging purposes.
-        tf.summary.scalar('train_accuracy', accuracy)
 
     return {
         'train_step': train_op,

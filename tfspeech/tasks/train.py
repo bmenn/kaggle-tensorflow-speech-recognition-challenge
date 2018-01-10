@@ -32,6 +32,8 @@ class TrainTensorflowModel(luigi.Task):
 
     data_files = luigi.ListParameter()
     label_files = luigi.ListParameter()
+    validation_data = luigi.ListParameter()
+    validation_labels = luigi.ListParameter()
     downsample_rate = luigi.FloatParameter(default=1.0)
     num_epochs = luigi.IntParameter(default=40)
     batch_size = luigi.IntParameter(default=32)
@@ -77,6 +79,40 @@ class TrainTensorflowModel(luigi.Task):
     def build_graph(self, num_samples):
         return self.model_class()()
 
+    def _metrics(self, sess, x, y):
+        if len(x) == 0 or len(y) == 0:
+            return None
+        feed_dict = {}
+        try:
+            sess.graph.get_operation_by_name('keep_probability')
+            feed_dict.update({'keep_probability:0': 1.0})
+        except KeyError:
+            pass
+        try:
+            sess.graph.get_operation_by_name('training/is_training')
+            feed_dict['training/is_training:0'] = False
+        except KeyError:
+            pass
+
+        accuracy = 0
+        counter = 0
+        for i in range(0, len(y), 1024):
+            feed_dict.update({
+                'training/wav_input:0': x[i:i+1024],
+                'training/label:0': y[i:i+1024],
+                'training/sample_rate:0': 16000 * np.ones((len(y[i:i+1024]), 1)),
+            })
+            accuracy += sess.run(
+                'train_metrics/accuracy:0',
+                feed_dict=feed_dict
+            )
+            counter += 1
+
+        accuracy = accuracy / counter
+        return {
+            'accuracy': accuracy,
+        }
+
     def run(self):
         x = []
         for data_file in self.data_files:
@@ -90,25 +126,35 @@ class TrainTensorflowModel(luigi.Task):
                 y.append(hf['data'][:])
         y = np.vstack(y)
 
+        x_valid = []
+        for data_file in self.validation_data:
+            with h5py.File(data_file, 'r') as hf:
+                x_valid.append(hf['data'][:])
+        x_valid = np.vstack(x_valid)
+
+        y_valid = []
+        for label_file in self.validation_labels:
+            with h5py.File(label_file, 'r') as hf:
+                y_valid.append(hf['data'][:])
+        y_valid = np.vstack(y_valid)
+
         data_indices = np.arange(len(y))
         np.random.shuffle(data_indices)
         start_index = 0
-
 
         graph = tf.Graph()
         with graph.as_default():
             ops = self.build_graph(len(y))
             merged = tf.summary.merge_all()
             writer = tf.summary.FileWriter('tflogs/' + self.model_id)
-            steps = int(self.num_epochs * len(y) / self.batch_size)
             # TODO: Need to implement some kind of atomic like behavior similar
             # to Target classes. Otherwise, if the save path exists the builder
             # with fail to instantiate.
             saver = tf.train.Saver()
-
+        steps = int(self.num_epochs * len(y) / self.batch_size)
+        steps_per_epoch = int(len(y) / self.batch_size)
         initial_step = 0
         with tf.Session(graph=graph) as sess:
-
             ckpt = tf.train.get_checkpoint_state(os.path.split(self.checkpoint_path)[0])
             if ckpt and ckpt.model_checkpoint_path:
                 saver.restore(sess, self.checkpoint_path)
@@ -122,9 +168,10 @@ class TrainTensorflowModel(luigi.Task):
                         np.random.shuffle(data_indices)
                         start_index = 0
                     stop_index = start_index + self.batch_size
+                    mask = data_indices[start_index:stop_index]
                     feed_dict = {
-                        'training/wav_input:0': x[start_index:stop_index],
-                        'training/label:0': y[start_index:stop_index],
+                        'training/wav_input:0': x[mask],
+                        'training/label:0': y[mask],
                         'training/sample_rate:0': 16000 * np.ones((self.batch_size, 1)),
                     }
                     try:
@@ -138,19 +185,32 @@ class TrainTensorflowModel(luigi.Task):
                     except KeyError:
                         pass
 
-                    if i % 10 == 0:
-                        sess.run(
-                            'train_step',
-                            feed_dict=feed_dict
-                        )
-                        try:
-                            sess.graph.get_operation_by_name('training/is_training')
-                            feed_dict.update({'training/is_training:0':
-                                              False})
-                        except KeyError:
-                            pass
+                    if i % steps_per_epoch == 0:
+                        saver.save(sess, self.checkpoint_path)
+                        LOGGER.info('Model %s training progress: %d/%d' %
+                                    (self.model_id, i, steps))
+                        metrics = self._metrics(sess, x_valid, y_valid)
+                        if metrics is not None:
+                            for k, v in metrics.items():
+                                summary = tf.Summary()
+                                summary.value.add(
+                                    tag='valid_metrics/' + k,
+                                    simple_value=v
+                                    )
+                                writer.add_summary(summary, i)
+
+                    if i % int(steps_per_epoch / 20) == 0:
+                        metrics = self._metrics(sess, x, y)
+                        if metrics is not None:
+                            for k, v in metrics.items():
+                                summary = tf.Summary()
+                                summary.value.add(
+                                    tag='train_metrics/' + k,
+                                    simple_value=v
+                                    )
+                                writer.add_summary(summary, i)
                         summary, _ = sess.run(
-                            [merged, 'train_metrics/accuracy'],
+                            [merged, 'train_step'],
                             feed_dict=feed_dict
                         )
                         writer.add_summary(summary, i)
@@ -159,12 +219,8 @@ class TrainTensorflowModel(luigi.Task):
                             'train_step',
                             feed_dict=feed_dict
                         )
-                        start_index += self.batch_size
+                    start_index += self.batch_size
 
-                    if i % 1000 == 0:
-                        saver.save(sess, self.checkpoint_path)
-                        LOGGER.info('Model %s training progress: %d/%d' %
-                                    (self.model_id, i, steps))
             except KeyboardInterrupt as e:
                 LOGGER.info('Stopping model %s, training progress: %d/%d' %
                             (self.model_id, i, steps))
@@ -405,11 +461,13 @@ class TrainAllModels(luigi.Task):
     data_files = luigi.ListParameter()
     label_files = luigi.ListParameter()
 
-    validation_tasks = [ValidateMfccSpectrogramCNN,
-                        ValidateLogMelSpectrogramCNN]
-    train_all_data_task = [MfccSpectrogramCNN,
-                           LogMelSpectrogramCNN,
-                           LogMelSpectrogramResNet]
+    validation_tasks = []
+    train_all_data_task = []
+    # validation_tasks = [ValidateMfccSpectrogramCNN,
+    #                     ValidateLogMelSpectrogramCNN]
+    # train_all_data_task = [MfccSpectrogramCNN,
+    #                        LogMelSpectrogramCNN,
+    #                        LogMelSpectrogramResNet]
     # Some models are not configurable due to old implementation. In an
     # effort to not delete previously trained data, None is use to hack
     # older implementations into compatibility.
@@ -463,11 +521,15 @@ class TrainAllModels(luigi.Task):
                 models.append(task_class(
                     data_files=self.data_files,
                     label_files=self.label_files,
+                    validation_data=[],
+                    validation_labels=[],
                 ))
             else:
                 models.append(task_class(
                     data_files=self.data_files,
                     label_files=self.label_files,
+                    validation_data=[],
+                    validation_labels=[],
                     model_settings=settings,
                 ))
 
