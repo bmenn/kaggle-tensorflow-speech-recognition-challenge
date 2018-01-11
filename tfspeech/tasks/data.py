@@ -233,6 +233,79 @@ class DoDataPreProcessing(luigi.Task):
         ]
 
 
+@luigi.util.inherits(DoDataPreProcessing)
+class MixBackgroundWithRecordings(luigi.Task):
+
+    '''Wrapper task to execute all the data pre-processing'''
+
+    num_partitions = luigi.IntParameter()
+    data_directories = luigi.ListParameter()
+    base_dir = luigi.Parameter(default='data')
+
+    duplicate_count = 5
+
+    def requires(self):
+        return {
+            'partitions': self.clone(DoDataPreProcessing),
+            'background': BackgroundNoiseRecordings(),
+        }
+
+    def output(self):
+        return {
+            'data': [
+                luigi.LocalTarget(os.path.split(t.path)[0] + '/data_noised.h5')
+                for t in self.input()['partitions']['data']
+            ],
+            'labels': [
+                luigi.LocalTarget(os.path.split(t.path)[0] + '/label_noised.h5')
+                for t in self.input()['partitions']['labels']
+            ],
+        }
+
+    def _add_noise_and_write(self, data_path, label_path, backgrounds, index):
+        with h5py.File(data_path, 'r') as hf:
+            data = hf['data'][:]
+        with h5py.File(label_path, 'r') as hf:
+            label = hf['data'][:]
+        noised_data = np.repeat(data, self.duplicate_count, axis=0)
+        noised_labels = np.repeat(label, self.duplicate_count, axis=0)
+
+        sample_length = noised_data.shape[1]
+        background_samples = np.zeros(noised_data.shape)
+        num_backgrounds = len(backgrounds)
+        for i in range(background_samples.shape[0]):
+            selected_background = backgrounds[
+                random.randrange(num_backgrounds - 1)]
+            start = random.randrange(len(selected_background)
+                                     - sample_length)
+            background_samples[i, :] = (
+                selected_background[start:start + sample_length]
+                * np.random.uniform(low=0.1, high=0.4,
+                                    size=(1, ))
+            )
+
+        noised_data = noised_data + background_samples
+        noised_data = np.clip(noised_data, -1, 1)
+
+        # Writing out here to abuse the stack and keep memory usage lower
+        with h5py.File(self.output()['data'][index].path,
+                       'w') as hf:
+            hf.create_dataset('data', data=noised_data)
+        with h5py.File(self.output()['labels'][index].path,
+                       'w') as hf:
+            hf.create_dataset('data', data=noised_labels)
+
+    def run(self):
+        backgrounds = [scipy.io.wavfile.read(t.path)[1]
+                       for t in self.input()['background'].values()]
+        for i in range(self.num_partitions):
+            data_target = self.input()['partitions']['data'][i]
+            label_target = self.input()['partitions']['labels'][i]
+
+            self._add_noise_and_write(data_target.path, label_target.path,
+                                      backgrounds, i)
+
+
 class ConvertTestWavToArray(luigi.Task):
 
     '''Convert wavfiles to arrays of floats'''
