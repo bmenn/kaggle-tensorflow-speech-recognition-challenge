@@ -525,7 +525,7 @@ class TrainAllModels(luigi.Task):
     model_settings = [
         None,
         None,
-        {'resnet_size': 20}
+        {'resnet_size': 56}
     ]
 
     def model_tasks(self):
