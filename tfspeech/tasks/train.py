@@ -113,30 +113,34 @@ class TrainTensorflowModel(luigi.Task):
             'accuracy': accuracy,
         }
 
+    def _read_data(self, input, data, start, stop):
+            data[start:stop, :] = input[:]
+
+    def _combine_h5_files(self, files, dataset='data'):
+        # Determine h5 data shape for pre-allocation
+        strides = [0]
+        widths = []
+        for fname in files:
+            with h5py.File(fname, 'r') as hf:
+                n, w = hf[dataset].shape
+                strides.append(strides[-1] + n)
+                widths.append(w)
+
+        assert len(set(widths)) == 1, 'Inconsistent data width, giving up'
+        data = np.zeros((strides[-1], widths[0]))
+        for fname, start, stop in zip(files, strides[:-1], strides[1:]):
+            with h5py.File(fname, 'r') as hf:
+                # Abuse stack and gc to minimize memory usage
+                self._read_data(hf[dataset], data, start, stop)
+
+        return data
+
     def run(self):
-        x = []
-        for data_file in self.data_files:
-            with h5py.File(data_file, 'r') as hf:
-                x.append(hf['data'][:])
-        x = np.vstack(x)
+        x = self._combine_h5_files(self.data_files)
+        y = self._combine_h5_files(self.label_files)
 
-        y = []
-        for label_file in self.label_files:
-            with h5py.File(label_file, 'r') as hf:
-                y.append(hf['data'][:])
-        y = np.vstack(y)
-
-        x_valid = []
-        for data_file in self.validation_data:
-            with h5py.File(data_file, 'r') as hf:
-                x_valid.append(hf['data'][:])
-        x_valid = np.vstack(x_valid)
-
-        y_valid = []
-        for label_file in self.validation_labels:
-            with h5py.File(label_file, 'r') as hf:
-                y_valid.append(hf['data'][:])
-        y_valid = np.vstack(y_valid)
+        x_valid = self._combine_h5_files(self.validation_data)
+        y_valid = self._combine_h5_files(self.validation_labels)
 
         data_indices = np.arange(len(y))
         np.random.shuffle(data_indices)
@@ -336,30 +340,34 @@ class ValidateTensorflowModel(luigi.Task):
                                                       'metrics.json')),
         }
 
+    def _read_data(self, input, data, start, stop):
+            data[start:stop, :] = input[:]
+
+    def _combine_h5_files(self, files, dataset='data'):
+        # Determine h5 data shape for pre-allocation
+        strides = [0]
+        widths = []
+        for fname in files:
+            with h5py.File(fname, 'r') as hf:
+                n, w = hf[dataset].shape
+                strides.append(strides[-1] + n)
+                widths.append(w)
+
+        assert len(set(widths)) == 1, 'Inconsistent data width, giving up'
+        data = np.zeros((strides[-1], widths[0]))
+        for fname, start, stop in zip(files, strides[:-1], strides[1:]):
+            with h5py.File(fname, 'r') as hf:
+                # Abuse stack and gc to minimize memory usage
+                self._read_data(hf[dataset], data, start, stop)
+
+        return data
+
     def run(self):
-        train_x = []
-        for data_file in self.data_files:
-            with h5py.File(data_file, 'r') as hf:
-                train_x.append(hf['data'][:])
-        train_x = np.vstack(train_x)
+        train_x = self._combine_h5_files(self.data_files)
+        train_y = self._combine_h5_files(self.label_files)
 
-        train_y = []
-        for label_file in self.label_files:
-            with h5py.File(label_file, 'r') as hf:
-                train_y.append(hf['data'][:])
-        train_y = np.vstack(train_y)
-
-        x = []
-        for data_file in self.validation_data:
-            with h5py.File(data_file, 'r') as hf:
-                x.append(hf['data'][:])
-        x = np.vstack(x)
-
-        y = []
-        for label_file in self.validation_labels:
-            with h5py.File(label_file, 'r') as hf:
-                y.append(hf['data'][:])
-        y = np.vstack(y)
+        x = self._combine_h5_files(self.validation_data)
+        y = self._combine_h5_files(self.validation_labels)
 
         with tf.Session(graph=tf.Graph()) as sess:
             tf.saved_model.loader.load(

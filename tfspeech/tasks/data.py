@@ -241,8 +241,7 @@ class MixBackgroundWithRecordings(luigi.Task):
     num_partitions = luigi.IntParameter()
     data_directories = luigi.ListParameter()
     base_dir = luigi.Parameter(default='data')
-
-    duplicate_count = 5
+    duplicate_count = luigi.IntParameter(default=3)
 
     def requires(self):
         return {
@@ -253,11 +252,15 @@ class MixBackgroundWithRecordings(luigi.Task):
     def output(self):
         return {
             'data': [
-                luigi.LocalTarget(os.path.split(t.path)[0] + '/data_noised.h5')
+                luigi.LocalTarget(
+                    os.path.split(t.path)[0]
+                    + '/data_noised_%dx.h5' % self.duplicate_count)
                 for t in self.input()['partitions']['data']
             ],
             'labels': [
-                luigi.LocalTarget(os.path.split(t.path)[0] + '/label_noised.h5')
+                luigi.LocalTarget(
+                    os.path.split(t.path)[0]
+                    + '/label_noised_%dx.h5' % self.duplicate_count)
                 for t in self.input()['partitions']['labels']
             ],
         }
