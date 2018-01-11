@@ -283,7 +283,7 @@ class MixBackgroundWithRecordings(luigi.Task):
                                      - sample_length)
             background_samples[i, :] = (
                 selected_background[start:start + sample_length]
-                * np.random.uniform(low=0.1, high=0.4,
+                * np.random.uniform(low=0.05, high=0.2,
                                     size=(1, ))
             )
 
