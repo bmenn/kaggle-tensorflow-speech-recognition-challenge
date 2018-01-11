@@ -284,3 +284,92 @@ def log_mel_spectrogram_resnet(resnet_size, batch_size,
         'is_training': is_training,
         'y_predict': predictions['classes'],
     }
+
+
+def log_mel_spectrogram_resnet_custom(
+        resnet_size, batch_size, num_training_samples):
+    # TODO: Add inference graph, see
+    # tensorflow/tensorflow/examples/speech_commands/freeze.py
+    inputs = input_tensors()
+    x = inputs['wav_input']
+    s = inputs['sample_rate']
+    y_ = inputs['label']
+    is_training = inputs['is_training']
+    global_step = tf.train.get_or_create_global_step()
+
+    log_mel_spectrograms = log_mel_spectrogram(x, s)
+
+    image_size = [log_mel_spectrograms.shape[-2].value,
+                  log_mel_spectrograms.shape[-1].value]
+    log_mel_channels = tf.reshape(
+        log_mel_spectrograms,
+        [-1, image_size[0], image_size[1], 1])
+    log_mel_channels = tf.image.resize_images(
+        log_mel_channels,
+        size=(32, 32))
+
+    # Much of what is below is copied from imagenet_main.py (which is from
+    # Tensorflow official models
+    #
+    # Using CIFAR-10 model, data size matches more closely to this situation
+    network = resnet_model.cifar10_resnet_v2_generator(
+        resnet_size, len(LABELS) + 0)
+    logits = network(inputs=log_mel_channels,
+                     is_training=is_training)
+
+    predictions = {
+        'classes': tf.argmax(logits, axis=1, name='predict'),
+        'probabilities': tf.nn.softmax(logits, name='softmax_tensor')
+    }
+
+    cross_entropy = tf.losses.softmax_cross_entropy(
+        logits=logits, onehot_labels=y_)
+
+    # Create a tensor named cross_entropy for logging purposes.
+    tf.identity(cross_entropy, name='cross_entropy')
+    tf.summary.scalar('cross_entropy', cross_entropy)
+
+    # Add weight decay to the loss. We exclude the batch norm variables because
+    # doing so leads to a small improvement in accuracy.
+    loss = cross_entropy + _WEIGHT_DECAY * tf.add_n(
+        [tf.nn.l2_loss(v) for v in tf.trainable_variables()
+         if 'batch_normalization' not in v.name])
+
+    # Scale the learning rate linearly with the batch size. When the batch size
+    # is 128, the learning rate should be 0.1.
+    initial_learning_rate = 0.1 * batch_size / 128
+    batches_per_epoch = num_training_samples / batch_size
+
+    boundaries = [int(batches_per_epoch * epoch)
+                  for epoch in [50, 75, 100, 125]]
+    values = [initial_learning_rate * decay
+              for decay in [1, 0.1, 0.01, 0.001, 0.0001]]
+    learning_rate = tf.train.piecewise_constant(
+        tf.cast(global_step, tf.int32), boundaries, values)
+
+    # Create a tensor named learning_rate for logging purposes.
+    tf.identity(learning_rate, name='learning_rate')
+    tf.summary.scalar('learning_rate', learning_rate)
+
+    optimizer = tf.train.MomentumOptimizer(
+        learning_rate=learning_rate,
+        momentum=_MOMENTUM)
+
+    # Batch norm requires update_ops to be added as a train_op dependency.
+    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    with tf.control_dependencies(update_ops):
+        train_op = optimizer.minimize(loss, global_step, name='train_step')
+
+    with tf.name_scope('train_metrics'):
+        correct_prediction = tf.equal(predictions['classes'], tf.argmax(y_, 1))
+        accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32),
+                                  name='accuracy')
+
+    return {
+        'train_step': train_op,
+        'x': x,
+        'y': y_,
+        's': s,
+        'is_training': is_training,
+        'y_predict': predictions['classes'],
+    }

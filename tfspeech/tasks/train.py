@@ -295,6 +295,27 @@ class LogMelSpectrogramResNet(TrainParametrizedTensorflowModel):
         return self.model_class()(**settings)
 
 
+class LogMelSpectrogramResNetCustom(TrainParametrizedTensorflowModel):
+
+    '''Trains a customized ResNet using log Mel spectrograms
+
+    '''
+    batch_size = luigi.IntParameter(default=128)
+    num_epochs = luigi.IntParameter(default=125)
+
+    @staticmethod
+    def model_class():
+        return models.log_mel_spectrogram_resnet_custom
+
+    def build_graph(self, num_samples):
+        data_sizes = {
+            'num_training_samples': num_samples,
+            'batch_size': self.batch_size,
+        }
+        settings = {**self.model_settings, **data_sizes}
+        return self.model_class()(**settings)
+
+
 @luigi.util.inherits(TrainTensorflowModel)
 class ValidateTensorflowModel(luigi.Task):
 
@@ -442,7 +463,18 @@ class ValidateLogMelSpectrogramResNet(ValidateTensorflowModel):
     num_epochs = luigi.IntParameter(default=250)
 
 
-@luigi.util.requires(data.DoDataPreProcessing)
+@luigi.util.requires(LogMelSpectrogramResNetCustom)
+class ValidateLogMelSpectrogramResNetCustom(ValidateTensorflowModel):
+
+    '''Validates LogMelSpectrogramResNet
+
+    '''
+
+    batch_size = luigi.IntParameter(default=128)
+    num_epochs = luigi.IntParameter(default=125)
+
+
+@luigi.util.inherits(data.DoDataPreProcessing)
 class InitiateTraining(luigi.Task):
 
     '''Initiates training of all models
@@ -450,11 +482,22 @@ class InitiateTraining(luigi.Task):
     This task act a gateway/middle-man between pre-processing and training.
     '''
 
+    def requires(self):
+        return {
+            'clean': self.clone(data.DoDataPreProcessing),
+            'noisy': self.clone(data.MixBackgroundWithRecordings),
+        }
+
+
     def run(self):
-        yield TrainAllModels(
-            data_files=[target.path for target in self.input()['data']],
-            label_files=[target.path for target in self.input()['labels']]
-        )
+        tasks = [
+            TrainAllModels(
+                data_files=[target.path for target in v['data']],
+                label_files=[target.path for target in v['labels']]
+            )
+            for v in self.input().values()
+        ]
+        yield tasks
 
 
 class TrainAllModels(luigi.Task):
@@ -507,7 +550,7 @@ class TrainAllModels(luigi.Task):
                             model_settings=settings,
                         ))
             # Add Resnet model
-            models.append(ValidateLogMelSpectrogramResNet(
+            models.append(ValidateLogMelSpectrogramResNetCustom(
                 data_files=data_subset,
                 label_files=labels_subset,
                 validation_data=[self.data_files[i]],
@@ -532,6 +575,13 @@ class TrainAllModels(luigi.Task):
                     validation_labels=[],
                     model_settings=settings,
                 ))
+            models.append(ValidateLogMelSpectrogramResNetCustom(
+                data_files=self.data_files,
+                label_files=self.label_files,
+                validation_data=[],
+                validation_labels=[],
+                model_settings=self.model_settings[2]
+            ))
 
         return models
 
