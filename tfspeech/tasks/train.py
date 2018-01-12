@@ -2,6 +2,7 @@
 
 '''
 import hashlib
+import itertools
 import json
 import logging
 import os
@@ -525,7 +526,8 @@ class TrainAllModels(luigi.Task):
     model_settings = [
         None,
         None,
-        {'resnet_size': 56}
+        {'block_sizes': [3, 3, 3],
+         'filters': [16, 32, 64]}
     ]
 
     def model_tasks(self):
@@ -559,8 +561,8 @@ class TrainAllModels(luigi.Task):
                         ))
             # Add Resnet model
             models.append(ValidateLogMelSpectrogramResNetCustom(
-                data_files=data_subset,
-                label_files=labels_subset,
+                data_files=data_subset[:1],
+                label_files=labels_subset[:1],
                 validation_data=[self.data_files[i]],
                 validation_labels=[self.label_files[i]],
                 model_settings=self.model_settings[2]
@@ -609,3 +611,74 @@ class TrainAllModels(luigi.Task):
 
     def run(self):
         yield self.model_tasks()
+
+
+@luigi.util.inherits(data.DoDataPreProcessing)
+class Experiment1(luigi.Task):
+
+    '''Compare the difference between old hacked models and newer ResNet
+    model
+
+    Constants:
+        Models: `LogMelSpectrogramResNet` OR
+                `LogMelSpectrogramResNetCustom`
+        Learning rate: Piecewise, `0.1 -> 0.01 -> 0.001` @ epochs
+    Variables:
+        Data type: Clean or Noisy (`n_clean == n_noisy`)
+        Spectrogram: Old configuration OR
+                     Published configuration in:
+
+        Tang, 2017. "Honk: A PyTorch Reimplementation of Convolution Neural
+        Networks for Keyword Spotting."
+
+    '''
+    old_spectrogram_opts = {'frame_length': 128,
+                            'frame_step': 64,
+                            'fft_length': 1024,
+                            'lower_hertz': 80.0,
+                            'upper_hertz': 7600.0,
+                            'num_mel_bins': 64}
+    pub_spectrogram_opts = {'frame_step': 160,
+                            'fft_length': 480,
+                            'lower_hertz': 20.0,
+                            'upper_hertz': 4000.0,
+                            'num_mel_bins': 40}
+
+    def requires(self):
+        return {
+            'clean': self.clone(data.DoDataPreProcessing),
+            'noisy': self.clone(data.MixBackgroundWithRecordings),
+        }
+
+
+    def run(self):
+        hacked_resnet_config = [
+            ('clean', ),
+            ('noisy', ),
+        ]
+        custom_resnet_config = itertools.product(
+            ['clean', 'noisy'],
+            [self.old_spectrogram_opts, self.pub_spectrogram_opts]
+        )
+
+        hacked_resnet_tasks = [
+            ValidateLogMelSpectrogramResNet(
+                data_files=self.input()[data_type]['data'][:-1],
+                label_files=self.input()[data_type]['labels'][:-1],
+                validation_data=self.input()[data_type]['data'][-1:],
+                validation_labels=self.input()[data_type]['labels'][-1:],
+            )
+            for (data_type, ) in hacked_resnet_config
+        ]
+        custom_resnet_tasks = [
+            ValidateLogMelSpectrogramResNetCustom(
+                data_files=self.input()[data_type]['data'][:-1],
+                label_files=self.input()[data_type]['labels'][:-1],
+                validation_data=self.input()[data_type]['data'][-1:],
+                validation_labels=self.input()[data_type]['labels'][-1:],
+                model_settings={'spectrogram_opts': spectrogram_opts},
+            )
+            for (data_type, spectrogram_opts) in custom_resnet_config
+        ]
+
+        yield hacked_resnet_tasks + custom_resnet_tasks

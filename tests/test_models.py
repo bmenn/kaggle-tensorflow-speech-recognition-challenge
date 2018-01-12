@@ -16,7 +16,11 @@ import tfspeech.models as models
         (models.log_mel_spectrogram_resnet,
          {'num_training_samples': 5, 'batch_size': 5, 'resnet_size': 20}),
         (models.log_mel_spectrogram_resnet_custom,
-         {'num_training_samples': 5, 'batch_size': 5, 'resnet_size': 56}),
+         {'num_training_samples': 5, 'batch_size': 5,
+          'block_sizes': [3, 4, 6, 3],
+          'filters': [16, 32, 64, 64],
+          }
+         ),
     ]
 )
 def test_mfcc_spectrogram_cnn(model_class, model_config):

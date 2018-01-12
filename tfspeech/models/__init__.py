@@ -52,9 +52,9 @@ def input_tensors():
     }
 
 
-def log_mel_spectrogram(x, s, frame_length=128, frame_step=64,
-                        fft_length=1024, lower_hertz=80.0,
-                        upper_hertz=7600.0, num_mel_bins=64):
+def log_mel_spectrogram(x, s, frame_length=480, frame_step=160,
+                        fft_length=None, lower_hertz=20.0,
+                        upper_hertz=4000.0, num_mel_bins=40):
     # MFCC related code stolen from
     # https://tensorflow.org/api_guides/python/contrib.signal#Computing_spectrograms
     stfts = tf.contrib.signal.stft(x, frame_length=frame_length,
@@ -209,7 +209,13 @@ def log_mel_spectrogram_resnet(resnet_size, batch_size,
     is_training = inputs['is_training']
     global_step = tf.train.get_or_create_global_step()
 
-    log_mel_spectrograms = log_mel_spectrogram(x, s)
+    spectrogram_opts = {'frame_length': 128,
+                        'frame_step': 64,
+                        'fft_length':1024,
+                        'lower_hertz': 80.0,
+                        'upper_hertz': 7600.0,
+                        'num_mel_bins': 64}
+    log_mel_spectrograms = log_mel_spectrogram(x, s, **spectrogram_opts)
 
     image_size = [log_mel_spectrograms.shape[-2].value,
                   log_mel_spectrograms.shape[-1].value]
@@ -253,7 +259,7 @@ def log_mel_spectrogram_resnet(resnet_size, batch_size,
     batches_per_epoch = num_training_samples / batch_size
 
     # Multiply the learning rate by 0.1 at 100, 150, and 200 epochs.
-    boundaries = [int(batches_per_epoch * epoch) for epoch in [100, 150, 200]]
+    boundaries = [int(batches_per_epoch * epoch) for epoch in [50, 75, 100]]
     values = [initial_learning_rate * decay for decay in [1, 0.1, 0.01, 0.001]]
     learning_rate = tf.train.piecewise_constant(
         tf.cast(global_step, tf.int32), boundaries, values)
@@ -287,9 +293,15 @@ def log_mel_spectrogram_resnet(resnet_size, batch_size,
 
 
 def log_mel_spectrogram_resnet_custom(
-        resnet_size, batch_size, num_training_samples):
+        block_sizes, filters, batch_size, num_training_samples,
+        spectrogram_opts=None):
     # TODO: Add inference graph, see
     # tensorflow/tensorflow/examples/speech_commands/freeze.py
+    if spectrogram_opts is None:
+        spectrogram_opts = {}
+    data_format = (
+        'channels_first' if tf.test.is_built_with_cuda() else 'channels_last')
+
     inputs = input_tensors()
     x = inputs['wav_input']
     s = inputs['sample_rate']
@@ -297,25 +309,53 @@ def log_mel_spectrogram_resnet_custom(
     is_training = inputs['is_training']
     global_step = tf.train.get_or_create_global_step()
 
-    log_mel_spectrograms = log_mel_spectrogram(x, s)
+    log_mel_spectrograms = log_mel_spectrogram(x, s, **spectrogram_opts)
 
+    # For a 16000 sample and default settings, size=98x40
     image_size = [log_mel_spectrograms.shape[-2].value,
                   log_mel_spectrograms.shape[-1].value]
     log_mel_channels = tf.reshape(
         log_mel_spectrograms,
         [-1, image_size[0], image_size[1], 1])
-    log_mel_channels = tf.image.resize_images(
-        log_mel_channels,
-        size=(32, 32))
 
-    # Much of what is below is copied from imagenet_main.py (which is from
-    # Tensorflow official models
-    #
-    # Using CIFAR-10 model, data size matches more closely to this situation
-    network = resnet_model.cifar10_resnet_v2_generator(
-        resnet_size, len(LABELS) + 0)
-    logits = network(inputs=log_mel_channels,
-                     is_training=is_training)
+    if data_format == 'channels_first':
+      # Convert the inputs from channels_last (NHWC) to channels_first (NCHW).
+      # This provides a large performance boost on GPU. See
+      # https://www.tensorflow.org/performance/performance_guide#data_formats
+      log_mel_channels = tf.transpose(log_mel_channels, [0, 3, 1, 2])
+
+    conv1 = resnet_model.conv2d_fixed_padding(
+        inputs=log_mel_channels,
+        filters=64,
+        kernel_size=[20, 8],
+        strides=1,
+        data_format=data_format
+        )
+
+    inputs = conv1
+    for i in range(len(block_sizes)):
+        # TODO Maybe add pooling after each block?
+        inputs = resnet_model.block_layer(
+            inputs=inputs, filters=filters[i],
+            block_fn=resnet_model.building_block, blocks=block_sizes[i],
+            strides=1, is_training=is_training,
+            name='block_layer%d' % (i + 1),
+            data_format=data_format,
+        )
+    inputs = resnet_model.batch_norm_relu(inputs, is_training,
+                                          data_format)
+    inputs = tf.layers.average_pooling2d(
+        inputs=inputs, pool_size=2, strides=1, padding='VALID',
+        data_format=data_format)
+    inputs = tf.identity(inputs, 'final_avg_pool')
+    # TODO Consider dropout
+    inputs = tf.reshape(inputs,
+                        [-1,
+                         inputs.shape[-3].value
+                         * inputs.shape[-2].value
+                         * inputs.shape[-1].value])
+    logits = tf.layers.dense(inputs=inputs, units=len(LABELS))
+    logits = tf.identity(logits, 'final_dense')
 
     predictions = {
         'classes': tf.argmax(logits, axis=1, name='predict'),
@@ -341,9 +381,9 @@ def log_mel_spectrogram_resnet_custom(
     batches_per_epoch = num_training_samples / batch_size
 
     boundaries = [int(batches_per_epoch * epoch)
-                  for epoch in [50, 75, 100, 125]]
+                  for epoch in [50, 75, 100]]
     values = [initial_learning_rate * decay
-              for decay in [1, 0.1, 0.01, 0.001, 0.0001]]
+              for decay in [1, 0.1, 0.01, 0.001]]
     learning_rate = tf.train.piecewise_constant(
         tf.cast(global_step, tf.int32), boundaries, values)
 

@@ -241,7 +241,7 @@ class MixBackgroundWithRecordings(luigi.Task):
     num_partitions = luigi.IntParameter()
     data_directories = luigi.ListParameter()
     base_dir = luigi.Parameter(default='data')
-    duplicate_count = luigi.IntParameter(default=3)
+    duplicate_count = luigi.IntParameter(default=1)
 
     def requires(self):
         return {
@@ -265,7 +265,11 @@ class MixBackgroundWithRecordings(luigi.Task):
             ],
         }
 
-    def _add_noise_and_write(self, data_path, label_path, backgrounds, index):
+    def _add_noise_and_write(self, data_path, label_path, backgrounds,
+                             index, noise_multiplier=None):
+        if noise_multiplier is None:
+            noise_multiplier = [0.05, 0.2]
+
         with h5py.File(data_path, 'r') as hf:
             data = hf['data'][:]
         with h5py.File(label_path, 'r') as hf:
@@ -283,7 +287,8 @@ class MixBackgroundWithRecordings(luigi.Task):
                                      - sample_length)
             background_samples[i, :] = (
                 selected_background[start:start + sample_length]
-                * np.random.uniform(low=0.05, high=0.2,
+                * np.random.uniform(low=noise_multiplier[0],
+                                    high=noise_multiplier[1],
                                     size=(1, ))
             )
 
