@@ -29,6 +29,7 @@ class GenerateModelTestPredictions(luigi.Task):
     '''
 
     resources = {'tensorflow': 1}
+    batch_size = luigi.IntParameter(default=1024)
 
     def requires(self):
         return {
@@ -60,10 +61,10 @@ class GenerateModelTestPredictions(luigi.Task):
             # keep_prob=1.0), but we only need to check that the model is
             # updating.
             predictions = []
-            for i in range(0, len(x), 1024):
+            for i in range(0, len(x), self.batch_size):
                 feed_dict = {
-                    'training/wav_input:0': x[i:i+1024],
-                    'training/sample_rate:0': 16000 * np.ones((len(x[i:i+1024]), 1)),
+                    'training/wav_input:0': x[i:i+self.batch_size],
+                    'training/sample_rate:0': 16000 * np.ones((len(x[i:i+self.batch_size]), 1)),
                 }
                 try:
                     sess.graph.get_operation_by_name('keep_probability')

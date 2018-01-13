@@ -38,7 +38,7 @@ class TrainTensorflowModel(luigi.Task):
     downsample_rate = luigi.FloatParameter(default=1.0)
     num_epochs = luigi.IntParameter(default=40)
     batch_size = luigi.IntParameter(default=32)
-    dropout_rate = luigi.FloatParameter(default=0.2)
+    dropout_rate = luigi.FloatParameter(default=0.0)
 
     resources = {'tensorflow': 1}
 
@@ -80,7 +80,7 @@ class TrainTensorflowModel(luigi.Task):
     def build_graph(self, num_samples):
         return self.model_class()()
 
-    def _metrics(self, sess, x, y):
+    def _metrics(self, sess, x, y, use_cross_entropy=False):
         if len(x) == 0 or len(y) == 0:
             return None
         feed_dict = {}
@@ -96,6 +96,7 @@ class TrainTensorflowModel(luigi.Task):
             pass
 
         accuracy = 0
+        cross_entropy = 0
         counter = 0
         for i in range(0, len(y), self.batch_size):
             feed_dict.update({
@@ -105,13 +106,20 @@ class TrainTensorflowModel(luigi.Task):
             })
             accuracy += sess.run(
                 'train_metrics/accuracy:0',
-                feed_dict=feed_dict
+                feed_dict=feed_dict,
             )
+            if use_cross_entropy:
+                cross_entropy += sess.run(
+                    'loss/cross_entropy:0',
+                    feed_dict=feed_dict,
+                )
             counter += 1
 
         accuracy = accuracy / counter
+        cross_entropy = cross_entropy / counter
         return {
             'accuracy': accuracy,
+            'cross_entropy': cross_entropy if use_cross_entropy else None,
         }
 
     def _read_data(self, input, data, start, stop):
@@ -201,15 +209,17 @@ class TrainTensorflowModel(luigi.Task):
                             replace=False)
                         metrics = self._metrics(
                             sess,
-                            x_valid[valid_index], y_valid[valid_index])
+                            x_valid[valid_index], y_valid[valid_index],
+                            use_cross_entropy=True)
                         if metrics is not None:
                             for k, v in metrics.items():
-                                summary = tf.Summary()
-                                summary.value.add(
-                                    tag='valid_metrics/' + k,
-                                    simple_value=v
-                                    )
-                                writer.add_summary(summary, i)
+                                if v is not None:
+                                    summary = tf.Summary()
+                                    summary.value.add(
+                                        tag='valid_metrics/' + k,
+                                        simple_value=v
+                                        )
+                                    writer.add_summary(summary, i)
 
                         summary, _, train_accuracy = sess.run(
                             [merged, 'train_step', 'train_metrics/accuracy:0'],
@@ -649,7 +659,25 @@ class TrainAllModels(luigi.Task):
 
 
 @luigi.util.inherits(data.DoDataPreProcessing)
-class Experiment1(luigi.Task):
+class ExperimentBase(luigi.Task):
+
+    def moel_tasks(self):
+        raise NotImplementedError
+
+    def requires(self):
+        return {
+            'clean': self.clone(data.DoDataPreProcessing),
+            'noisy': self.clone(data.MixBackgroundWithRecordings),
+        }
+
+    def output(self):
+        return [task.output() for task in self.model_tasks()]
+
+    def run(self):
+        yield self.model_tasks()
+
+
+class Experiment1(ExperimentBase):
 
     '''Compare the difference between old hacked models and newer ResNet
     model
@@ -679,15 +707,6 @@ class Experiment1(luigi.Task):
                             'lower_hertz': 20.0,
                             'upper_hertz': 4000.0,
                             'num_mel_bins': 40}
-
-    def requires(self):
-        return {
-            'clean': self.clone(data.DoDataPreProcessing),
-            'noisy': self.clone(data.MixBackgroundWithRecordings),
-        }
-
-    def output(self):
-        return [task.output() for task in self.model_tasks()]
 
     def model_tasks(self):
         resnet_config = list(itertools.product(
@@ -729,5 +748,144 @@ class Experiment1(luigi.Task):
         ]
         return hacked_resnet_tasks + custom_resnet_tasks
 
-    def run(self):
-        yield self.model_tasks()
+
+class Experiment2(ExperimentBase):
+
+    '''Evaluate the difference between validating with noisy data and clean
+    data
+
+    Constants:
+        Models: `LogMelSpectrogramResNetConvNet`
+        Epochs: 20, reduced to minimize runtime. Overfitting started around
+            epoch 15-17 in Experiment1 for `LogMelSpectrogramConvNet`.
+        Spectrogram: Published configuration in
+
+            Tang, 2017. "Honk: A PyTorch Reimplementation of Convolution
+            Neural Networks for Keyword Spotting."
+
+    Variables:
+        Validation Data type: Clean or Noisy (`n_clean == n_noisy`)
+
+    '''
+    spectrogram_opts = {'frame_step': 160,
+                        'fft_length': 480,
+                        'lower_hertz': 20.0,
+                        'upper_hertz': 4000.0,
+                        'num_mel_bins': 40}
+
+    def model_tasks(self):
+        convnet_tasks = [
+            ValidateLogMelSpectrogramConvNet(
+                data_files=[t.path for t in
+                            self.input()['noisy']['data'][:-1]],
+                label_files=[t.path for t in
+                             self.input()['noisy']['labels'][:-1]],
+                validation_data=[t.path for t in
+                                 self.input()[data_type]['data'][-1:]],
+                validation_labels=[t.path for t in
+                                   self.input()[data_type]['labels'][-1:]],
+                model_settings={'spectrogram_opts': self.spectrogram_opts,
+                                'filters': [64, 64],
+                                'kernel_sizes': [[20, 8], [10, 4]],
+                                'max_pool_sizes': [2, 1]},
+                num_epochs=20,
+            )
+            for data_type in ['clean', 'noisy']
+        ]
+        return convnet_tasks
+
+
+class Experiment3(ExperimentBase):
+
+    '''Tests convergence of ConvNet using clean validation data.
+
+    Continuation of Experiment 2 to see if severe overfitting occurs at
+    later epochs
+
+    Constants:
+        Models: `LogMelSpectrogramResNetConvNet`
+        Spectrogram: Published configuration in
+
+            Tang, 2017. "Honk: A PyTorch Reimplementation of Convolution
+            Neural Networks for Keyword Spotting."
+
+    Variables:
+        Epochs: 20 vs 40. Evaluate if severe overfitting occurs
+
+    '''
+    spectrogram_opts = {'frame_step': 160,
+                        'fft_length': 480,
+                        'lower_hertz': 20.0,
+                        'upper_hertz': 4000.0,
+                        'num_mel_bins': 40}
+
+    def model_tasks(self):
+        convnet_tasks = [
+            ValidateLogMelSpectrogramConvNet(
+                data_files=[t.path for t in
+                            self.input()['noisy']['data'][:-1]],
+                label_files=[t.path for t in
+                             self.input()['noisy']['labels'][:-1]],
+                validation_data=[t.path for t in
+                                 self.input()['clean']['data'][-1:]],
+                validation_labels=[t.path for t in
+                                   self.input()['clean']['labels'][-1:]],
+                model_settings={'spectrogram_opts': self.spectrogram_opts,
+                                'filters': [64, 64],
+                                'kernel_sizes': [[20, 8], [10, 4]],
+                                'max_pool_sizes': [2, 1]},
+                num_epochs=num_epochs,
+            )
+            for num_epochs in [20, 40]
+        ]
+        return convnet_tasks
+
+
+class Experiment4(ExperimentBase):
+
+    '''Evaluate the effect of dropout on accuracy
+
+    Dropout should slow down the rate of overfitting on training data and
+    improve validation metrics.
+
+    Constants:
+        Models: `LogMelSpectrogramResNetConvNet`
+        Spectrogram: Published configuration in
+
+            Tang, 2017. "Honk: A PyTorch Reimplementation of Convolution
+            Neural Networks for Keyword Spotting."
+        Epochs: 50. Slightly longer to allow train accuracy to converge
+            based on previous experiments.
+
+    Variables:
+        Dropout Rate: 0.20 (Comparing against previous experiments instead
+        of running a new model with old parametes to save time)
+
+    '''
+    spectrogram_opts = {'frame_step': 160,
+                        'fft_length': 480,
+                        'lower_hertz': 20.0,
+                        'upper_hertz': 4000.0,
+                        'num_mel_bins': 40}
+
+    def model_tasks(self):
+        convnet_tasks = [
+            ValidateLogMelSpectrogramConvNet(
+                data_files=[t.path for t in
+                            self.input()['noisy']['data'][:-1]],
+                label_files=[t.path for t in
+                             self.input()['noisy']['labels'][:-1]],
+                validation_data=[t.path for t in
+                                 self.input()['clean']['data'][-1:]],
+                validation_labels=[t.path for t in
+                                   self.input()['clean']['labels'][-1:]],
+                model_settings={'spectrogram_opts': self.spectrogram_opts,
+                                'filters': [64, 64],
+                                'kernel_sizes': [[20, 8], [10, 4]],
+                                'max_pool_sizes': [2, 1]},
+                num_epochs=50,
+                dropout_rate=dropout_rate
+            )
+            for dropout_rate in [0.20]
+        ]
+        return convnet_tasks

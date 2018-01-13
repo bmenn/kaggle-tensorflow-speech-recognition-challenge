@@ -409,7 +409,8 @@ def log_mel_spectrogram_resnet_custom(
 
 def log_mel_spectrogram_convnet(
         filters, max_pool_sizes, kernel_sizes,
-        batch_size, num_training_samples, spectrogram_opts=None):
+        batch_size, num_training_samples, spectrogram_opts=None,
+        dropout_rate=0.0):
     # TODO: Add inference graph, see
     # tensorflow/tensorflow/examples/speech_commands/freeze.py
     if spectrogram_opts is None:
@@ -422,6 +423,7 @@ def log_mel_spectrogram_convnet(
     s = inputs['sample_rate']
     y_ = inputs['label']
     is_training = inputs['is_training']
+    keep_prob = tf.placeholder(tf.float32, name='keep_probability')
     global_step = tf.train.get_or_create_global_step()
 
     log_mel_spectrograms = log_mel_spectrogram(x, s, **spectrogram_opts)
@@ -460,6 +462,7 @@ def log_mel_spectrogram_convnet(
                          inputs.shape[-3].value
                          * inputs.shape[-2].value
                          * inputs.shape[-1].value])
+    inputs = tf.nn.dropout(inputs, keep_prob)
     logits = tf.layers.dense(inputs=inputs, units=len(LABELS))
     logits = tf.identity(logits, 'final_dense')
 
@@ -472,7 +475,8 @@ def log_mel_spectrogram_convnet(
         logits=logits, onehot_labels=y_)
 
     # Create a tensor named cross_entropy for logging purposes.
-    tf.identity(cross_entropy, name='cross_entropy')
+    with tf.variable_scope('loss'):
+        tf.identity(cross_entropy, name='cross_entropy')
     tf.summary.scalar('cross_entropy', cross_entropy)
 
     # Add weight decay to the loss. We exclude the batch norm variables because
