@@ -92,7 +92,7 @@ def conv2d_fixed_padding(inputs, filters, kernel_size, strides, data_format):
 
 
 def building_block(inputs, filters, is_training, projection_shortcut, strides,
-                   data_format):
+                   data_format, kernel_size=3):
   """Standard building block for residual networks with BN before convolutions.
 
   Args:
@@ -119,12 +119,12 @@ def building_block(inputs, filters, is_training, projection_shortcut, strides,
     shortcut = projection_shortcut(inputs)
 
   inputs = conv2d_fixed_padding(
-      inputs=inputs, filters=filters, kernel_size=3, strides=strides,
+      inputs=inputs, filters=filters, kernel_size=kernel_size, strides=strides,
       data_format=data_format)
 
   inputs = batch_norm_relu(inputs, is_training, data_format)
   inputs = conv2d_fixed_padding(
-      inputs=inputs, filters=filters, kernel_size=3, strides=1,
+      inputs=inputs, filters=filters, kernel_size=kernel_size, strides=1,
       data_format=data_format)
 
   return inputs + shortcut
@@ -176,7 +176,7 @@ def bottleneck_block(inputs, filters, is_training, projection_shortcut,
 
 
 def block_layer(inputs, filters, block_fn, blocks, strides, is_training, name,
-                data_format):
+                data_format, kernel_size=None):
   """Creates one layer of blocks for the ResNet model.
 
   Args:
@@ -196,6 +196,8 @@ def block_layer(inputs, filters, block_fn, blocks, strides, is_training, name,
   Returns:
     The output tensor of the block layer.
   """
+  if kernel_size is None:
+      kernel_size = 3
   # Bottleneck blocks end with 4x the number of filters as they start with
   filters_out = 4 * filters if block_fn is bottleneck_block else filters
 
@@ -204,12 +206,14 @@ def block_layer(inputs, filters, block_fn, blocks, strides, is_training, name,
         inputs=inputs, filters=filters_out, kernel_size=1, strides=strides,
         data_format=data_format)
 
+  # TODO bottleneck_block does not take kernel_size
   # Only the first block per block_layer uses projection_shortcut and strides
   inputs = block_fn(inputs, filters, is_training, projection_shortcut, strides,
-                    data_format)
+                    data_format, kernel_size=kernel_size)
 
   for _ in range(1, blocks):
-    inputs = block_fn(inputs, filters, is_training, None, 1, data_format)
+    inputs = block_fn(inputs, filters, is_training, None, 1, data_format,
+                      kernel_size=kernel_size)
 
   return tf.identity(inputs, name)
 

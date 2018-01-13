@@ -97,11 +97,11 @@ class TrainTensorflowModel(luigi.Task):
 
         accuracy = 0
         counter = 0
-        for i in range(0, len(y), 1024):
+        for i in range(0, len(y), self.batch_size):
             feed_dict.update({
-                'training/wav_input:0': x[i:i+1024],
-                'training/label:0': y[i:i+1024],
-                'training/sample_rate:0': 16000 * np.ones((len(y[i:i+1024]), 1)),
+                'training/wav_input:0': x[i:i+self.batch_size],
+                'training/label:0': y[i:i+self.batch_size],
+                'training/sample_rate:0': 16000 * np.ones((len(y[i:i+self.batch_size]), 1)),
             })
             accuracy += sess.run(
                 'train_metrics/accuracy:0',
@@ -189,13 +189,19 @@ class TrainTensorflowModel(luigi.Task):
                         feed_dict.update({'training/is_training:0': True})
                     except KeyError:
                         pass
-
                     if i % steps_per_epoch == 0:
-                        # Benchmark at beginning of each epoch
                         saver.save(sess, self.checkpoint_path)
                         LOGGER.info('Model %s training progress: %d/%d' %
                                     (self.model_id, i, steps))
-                        metrics = self._metrics(sess, x_valid, y_valid)
+
+                    if i % int(steps_per_epoch * 0.01) == 0:
+                        valid_index = np.random.choice(
+                            len(x_valid),
+                            size=self.batch_size,
+                            replace=False)
+                        metrics = self._metrics(
+                            sess,
+                            x_valid[valid_index], y_valid[valid_index])
                         if metrics is not None:
                             for k, v in metrics.items():
                                 summary = tf.Summary()
@@ -204,21 +210,18 @@ class TrainTensorflowModel(luigi.Task):
                                     simple_value=v
                                     )
                                 writer.add_summary(summary, i)
-                        metrics = self._metrics(sess, x, y)
-                        if metrics is not None:
-                            for k, v in metrics.items():
-                                summary = tf.Summary()
-                                summary.value.add(
-                                    tag='train_metrics/' + k,
-                                    simple_value=v
-                                    )
-                                writer.add_summary(summary, i)
 
-                        summary, _ = sess.run(
-                            [merged, 'train_step'],
+                        summary, _, train_accuracy = sess.run(
+                            [merged, 'train_step', 'train_metrics/accuracy:0'],
                             feed_dict=feed_dict
                         )
+                        train_summary = tf.Summary()
+                        train_summary.value.add(
+                            tag='train_metrics/accuracy',
+                            simple_value=train_accuracy
+                        )
                         writer.add_summary(summary, i)
+                        writer.add_summary(train_summary, i)
                     else:
                         sess.run(
                             'train_step',
@@ -284,8 +287,8 @@ class LogMelSpectrogramResNet(TrainParametrizedTensorflowModel):
     '''Trains a ResNet using log Mel spectrograms
 
     '''
-    batch_size = luigi.IntParameter(default=128)
-    num_epochs = luigi.IntParameter(default=250)
+    batch_size = luigi.IntParameter()
+    num_epochs = luigi.IntParameter()
 
     @staticmethod
     def model_class():
@@ -305,12 +308,33 @@ class LogMelSpectrogramResNetCustom(TrainParametrizedTensorflowModel):
     '''Trains a customized ResNet using log Mel spectrograms
 
     '''
-    batch_size = luigi.IntParameter(default=128)
-    num_epochs = luigi.IntParameter(default=125)
+    batch_size = luigi.IntParameter()
+    num_epochs = luigi.IntParameter()
 
     @staticmethod
     def model_class():
         return models.log_mel_spectrogram_resnet_custom
+
+    def build_graph(self, num_samples):
+        data_sizes = {
+            'num_training_samples': num_samples,
+            'batch_size': self.batch_size,
+        }
+        settings = {**self.model_settings, **data_sizes}
+        return self.model_class()(**settings)
+
+
+class LogMelSpectrogramConvNet(TrainParametrizedTensorflowModel):
+
+    '''Trains a customized ResNet using log Mel spectrograms
+
+    '''
+    batch_size = luigi.IntParameter()
+    num_epochs = luigi.IntParameter()
+
+    @staticmethod
+    def model_class():
+        return models.log_mel_spectrogram_convnet
 
     def build_graph(self, num_samples):
         data_sizes = {
@@ -381,11 +405,11 @@ class ValidateTensorflowModel(luigi.Task):
             # keep_prob=1.0), but we only need to check that the model is
             # updating.
             predictions = []
-            for i in range(0, len(y), 1024):
+            for i in range(0, len(y), self.batch_size):
                 feed_dict = {
-                    'training/wav_input:0': x[i:i+1024],
-                    'training/label:0': y[i:i+1024],
-                    'training/sample_rate:0': 16000 * np.ones((len(y[i:i+1024]), 1)),
+                    'training/wav_input:0': x[i:i+self.batch_size],
+                    'training/label:0': y[i:i+self.batch_size],
+                    'training/sample_rate:0': 16000 * np.ones((len(y[i:i+self.batch_size]), 1)),
                 }
                 try:
                     sess.graph.get_operation_by_name('keep_probability')
@@ -403,11 +427,11 @@ class ValidateTensorflowModel(luigi.Task):
                 ))
 
             train_predictions = []
-            for i in range(0, len(train_y), 1024):
+            for i in range(0, len(train_y), self.batch_size):
                 feed_dict = {
-                    'training/wav_input:0': train_x[i:i+1024],
-                    'training/label:0': train_y[i:i+1024],
-                    'training/sample_rate:0': 16000 * np.ones((len(train_y[i:i+1024]), 1)),
+                    'training/wav_input:0': train_x[i:i+self.batch_size],
+                    'training/label:0': train_y[i:i+self.batch_size],
+                    'training/sample_rate:0': 16000 * np.ones((len(train_y[i:i+self.batch_size]), 1)),
                 }
                 try:
                     sess.graph.get_operation_by_name('keep_probability')
@@ -469,7 +493,7 @@ class ValidateLogMelSpectrogramResNet(ValidateTensorflowModel):
     '''
 
     batch_size = luigi.IntParameter(default=128)
-    num_epochs = luigi.IntParameter(default=250)
+    num_epochs = luigi.IntParameter(default=100)
 
 
 @luigi.util.requires(LogMelSpectrogramResNetCustom)
@@ -480,7 +504,18 @@ class ValidateLogMelSpectrogramResNetCustom(ValidateTensorflowModel):
     '''
 
     batch_size = luigi.IntParameter(default=128)
-    num_epochs = luigi.IntParameter(default=125)
+    num_epochs = luigi.IntParameter(default=100)
+
+
+@luigi.util.requires(LogMelSpectrogramConvNet)
+class ValidateLogMelSpectrogramConvNet(ValidateTensorflowModel):
+
+    '''Validates LogMelSpectrogramResNet
+
+    '''
+
+    batch_size = luigi.IntParameter(default=128)
+    num_epochs = luigi.IntParameter(default=40)
 
 
 @luigi.util.inherits(data.DoDataPreProcessing)
@@ -621,8 +656,9 @@ class Experiment1(luigi.Task):
 
     Constants:
         Models: `LogMelSpectrogramResNet` OR
-                `LogMelSpectrogramResNetCustom`
+                `LogMelSpectrogramResNetConvNet`
         Learning rate: Piecewise, `0.1 -> 0.01 -> 0.001` @ epochs
+
     Variables:
         Data type: Clean or Noisy (`n_clean == n_noisy`)
         Spectrogram: Old configuration OR
@@ -650,35 +686,48 @@ class Experiment1(luigi.Task):
             'noisy': self.clone(data.MixBackgroundWithRecordings),
         }
 
+    def output(self):
+        return [task.output() for task in self.model_tasks()]
 
-    def run(self):
-        hacked_resnet_config = [
-            ('clean', ),
-            ('noisy', ),
-        ]
-        custom_resnet_config = itertools.product(
+    def model_tasks(self):
+        resnet_config = list(itertools.product(
             ['clean', 'noisy'],
             [self.old_spectrogram_opts, self.pub_spectrogram_opts]
-        )
+        ))
 
         hacked_resnet_tasks = [
             ValidateLogMelSpectrogramResNet(
-                data_files=self.input()[data_type]['data'][:-1],
-                label_files=self.input()[data_type]['labels'][:-1],
-                validation_data=self.input()[data_type]['data'][-1:],
-                validation_labels=self.input()[data_type]['labels'][-1:],
+                data_files=[t.path for t in
+                            self.input()[data_type]['data'][:-1]],
+                label_files=[t.path for t in
+                             self.input()[data_type]['labels'][:-1]],
+                validation_data=[t.path for t in
+                                 self.input()[data_type]['data'][-1:]],
+                validation_labels=[t.path for t in
+                                   self.input()[data_type]['labels'][-1:]],
+                model_settings={'spectrogram_opts': spectrogram_opts,
+                                'resnet_size': 20},
             )
-            for (data_type, ) in hacked_resnet_config
+            for (data_type, spectrogram_opts) in resnet_config
         ]
         custom_resnet_tasks = [
-            ValidateLogMelSpectrogramResNetCustom(
-                data_files=self.input()[data_type]['data'][:-1],
-                label_files=self.input()[data_type]['labels'][:-1],
-                validation_data=self.input()[data_type]['data'][-1:],
-                validation_labels=self.input()[data_type]['labels'][-1:],
-                model_settings={'spectrogram_opts': spectrogram_opts},
+            ValidateLogMelSpectrogramConvNet(
+                data_files=[t.path for t in
+                            self.input()[data_type]['data'][:-1]],
+                label_files=[t.path for t in
+                             self.input()[data_type]['labels'][:-1]],
+                validation_data=[t.path for t in
+                                 self.input()[data_type]['data'][-1:]],
+                validation_labels=[t.path for t in
+                                   self.input()[data_type]['labels'][-1:]],
+                model_settings={'spectrogram_opts': spectrogram_opts,
+                                'filters': [64, 64],
+                                'kernel_sizes': [[20, 8], [10, 4]],
+                                'max_pool_sizes': [2, 1]}
             )
-            for (data_type, spectrogram_opts) in custom_resnet_config
+            for (data_type, spectrogram_opts) in resnet_config
         ]
+        return hacked_resnet_tasks + custom_resnet_tasks
 
-        yield hacked_resnet_tasks + custom_resnet_tasks
+    def run(self):
+        yield self.model_tasks()
