@@ -355,6 +355,27 @@ class LogMelSpectrogramConvNet(TrainParametrizedTensorflowModel):
         return self.model_class()(**settings)
 
 
+class LogMelSpectrogramResNetv2(TrainParametrizedTensorflowModel):
+
+    '''Trains a customized ResNet using log Mel spectrograms
+
+    '''
+    batch_size = luigi.IntParameter()
+    num_epochs = luigi.IntParameter()
+
+    @staticmethod
+    def model_class():
+        return models.log_mel_spectrogram_resnet_v2
+
+    def build_graph(self, num_samples):
+        data_sizes = {
+            'num_training_samples': num_samples,
+            'batch_size': self.batch_size,
+        }
+        settings = {**self.model_settings, **data_sizes}
+        return self.model_class()(**settings)
+
+
 @luigi.util.inherits(TrainTensorflowModel)
 class ValidateTensorflowModel(luigi.Task):
 
@@ -528,6 +549,17 @@ class ValidateLogMelSpectrogramConvNet(ValidateTensorflowModel):
     num_epochs = luigi.IntParameter(default=40)
 
 
+@luigi.util.requires(LogMelSpectrogramResNetv2)
+class ValidateLogMelSpectrogramResNetv2(ValidateTensorflowModel):
+
+    '''Validates LogMelSpectrogramResNetv2
+
+    '''
+
+    batch_size = luigi.IntParameter(default=128)
+    num_epochs = luigi.IntParameter(default=40)
+
+
 @luigi.util.inherits(data.DoDataPreProcessing)
 class InitiateTraining(luigi.Task):
 
@@ -668,6 +700,12 @@ class ExperimentBase(luigi.Task):
         return {
             'clean': self.clone(data.DoDataPreProcessing),
             'noisy': self.clone(data.MixBackgroundWithRecordings),
+            'noisy_0': self.clone(data.MixBackgroundWithRecordings,
+                                  percentage=0.0),
+            'noisy_0.1': self.clone(data.MixBackgroundWithRecordings,
+                                    percentage=0.1),
+            'noisy_0.8': self.clone(data.MixBackgroundWithRecordings,
+                                    percentage=0.8),
         }
 
     def output(self):
@@ -887,5 +925,155 @@ class Experiment4(ExperimentBase):
                 dropout_rate=dropout_rate
             )
             for dropout_rate in [0.20]
+        ]
+        return convnet_tasks
+
+
+class Experiment5(ExperimentBase):
+
+    '''Evaluate a second attempt at ResNet
+
+    Checking the hypothesis that a two layer ConvNet has trouble storing
+    enough information. Hoping a ResNet does not have this trouble.
+
+    Constants:
+        Models: `LogMelSpectrogramResNetv2`
+        Spectrogram: Published configuration in
+
+            Tang, 2017. "Honk: A PyTorch Reimplementation of Convolution
+            Neural Networks for Keyword Spotting."
+        Epochs: 50. Slightly longer to allow train accuracy to converge
+            based on previous experiments.
+        Dropout Rate: 0.20 (Comparing against previous experiments instead
+            of running a new model with old parametes to save time)
+
+    '''
+    spectrogram_opts = {'frame_step': 160,
+                        'fft_length': 480,
+                        'lower_hertz': 20.0,
+                        'upper_hertz': 4000.0,
+                        'num_mel_bins': 40}
+
+    def model_tasks(self):
+        convnet_tasks = [
+            ValidateLogMelSpectrogramResNetv2(
+                data_files=[t.path for t in
+                            self.input()['noisy']['data'][:-1]],
+                label_files=[t.path for t in
+                             self.input()['noisy']['labels'][:-1]],
+                validation_data=[t.path for t in
+                                 self.input()['clean']['data'][-1:]],
+                validation_labels=[t.path for t in
+                                   self.input()['clean']['labels'][-1:]],
+                model_settings={'spectrogram_opts': self.spectrogram_opts,
+                                'block_sizes': [3, 3],
+                                'filters': [64, 64],
+                                'kernel_sizes': [[20, 8], [10, 4]],
+                                'max_pool_sizes': [2, 1]},
+                num_epochs=50,
+                dropout_rate=dropout_rate
+            )
+            for dropout_rate in [0.20]
+        ]
+        return convnet_tasks
+
+
+class Experiment6(ExperimentBase):
+
+    '''Re-evaluate the effect of dropout on accuracy at a lower learning
+    rate
+
+    Loss curve suggest LR is too high (see
+    http://cs231n.github.io/neural-networks-3/).
+
+    Constants:
+        Models: `LogMelSpectrogramResNetConvNet`
+        Spectrogram: Published configuration in
+
+            Tang, 2017. "Honk: A PyTorch Reimplementation of Convolution
+            Neural Networks for Keyword Spotting."
+        Epochs: 50. Slightly longer to allow train accuracy to converge
+            based on previous experiments.
+        Dropout Rate: 0.20 (Comparing against previous experiments instead
+        of running a new model with old parametes to save time)
+
+    Variables:
+        Learning rate: 1e-6 (vs original 0.005)
+
+    '''
+    spectrogram_opts = {'frame_step': 160,
+                        'fft_length': 480,
+                        'lower_hertz': 20.0,
+                        'upper_hertz': 4000.0,
+                        'num_mel_bins': 40}
+
+    def model_tasks(self):
+        convnet_tasks = [
+            ValidateLogMelSpectrogramConvNet(
+                data_files=[t.path for t in
+                            self.input()['noisy']['data'][:-1]],
+                label_files=[t.path for t in
+                             self.input()['noisy']['labels'][:-1]],
+                validation_data=[t.path for t in
+                                 self.input()['clean']['data'][-1:]],
+                validation_labels=[t.path for t in
+                                   self.input()['clean']['labels'][-1:]],
+                model_settings={'spectrogram_opts': self.spectrogram_opts,
+                                'filters': [64, 64],
+                                'kernel_sizes': [[20, 8], [10, 4]],
+                                'max_pool_sizes': [2, 1],
+                                'initial_learning_rate': 1e-6},
+                num_epochs=50,
+                dropout_rate=dropout_rate
+            )
+            for dropout_rate in [0.20]
+        ]
+        return convnet_tasks
+
+
+class Experiment7(ExperimentBase):
+
+    '''Evaluate the effect of noisy (but less noisy) training data
+
+    Constants:
+        Models: `LogMelSpectrogramResNetConvNet`
+        Spectrogram: Published configuration in
+
+            Tang, 2017. "Honk: A PyTorch Reimplementation of Convolution
+            Neural Networks for Keyword Spotting."
+        Epochs: 50. Slightly longer to allow train accuracy to converge
+            based on previous experiments.
+        Dropout Rate: 0.20 (Comparing against previous experiments instead
+        of running a new model with old parametes to save time)
+
+    Variables:
+        Training data: 80% of data have random background noise added.
+
+    '''
+    spectrogram_opts = {'frame_step': 160,
+                        'fft_length': 480,
+                        'lower_hertz': 20.0,
+                        'upper_hertz': 4000.0,
+                        'num_mel_bins': 40}
+
+    def model_tasks(self):
+        convnet_tasks = [
+            ValidateLogMelSpectrogramConvNet(
+                data_files=[t.path for t in
+                            self.input()['noisy_0.1']['data'][:-1]],
+                label_files=[t.path for t in
+                             self.input()['noisy_0.1']['labels'][:-1]],
+                validation_data=[t.path for t in
+                                 self.input()['clean']['data'][-1:]],
+                validation_labels=[t.path for t in
+                                   self.input()['clean']['labels'][-1:]],
+                model_settings={'spectrogram_opts': self.spectrogram_opts,
+                                'filters': [64, 64],
+                                'kernel_sizes': [[20, 8], [10, 4]],
+                                'max_pool_sizes': [2, 1],
+                                'initial_learning_rate': 0.01},
+                num_epochs=40,
+                dropout_rate=0.2
+            )
         ]
         return convnet_tasks

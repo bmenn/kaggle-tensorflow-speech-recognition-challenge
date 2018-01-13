@@ -242,6 +242,7 @@ class MixBackgroundWithRecordings(luigi.Task):
     data_directories = luigi.ListParameter()
     base_dir = luigi.Parameter(default='data')
     duplicate_count = luigi.IntParameter(default=1)
+    percentage = luigi.FloatParameter(default=1.0)
 
     def requires(self):
         return {
@@ -254,13 +255,17 @@ class MixBackgroundWithRecordings(luigi.Task):
             'data': [
                 luigi.LocalTarget(
                     os.path.split(t.path)[0]
-                    + '/data_noised_%dx.h5' % self.duplicate_count)
+                    + '/data_noised_%dx_%0.2f.h5' % (self.duplicate_count,
+                                                     self.percentage)
+                )
                 for t in self.input()['partitions']['data']
             ],
             'labels': [
                 luigi.LocalTarget(
                     os.path.split(t.path)[0]
-                    + '/label_noised_%dx.h5' % self.duplicate_count)
+                    + '/label_noised_%dx_%0.2f.h5' % (self.duplicate_count,
+                                                      self.percentage)
+                )
                 for t in self.input()['partitions']['labels']
             ],
         }
@@ -273,9 +278,18 @@ class MixBackgroundWithRecordings(luigi.Task):
         with h5py.File(data_path, 'r') as hf:
             data = hf['data'][:]
         with h5py.File(label_path, 'r') as hf:
-            label = hf['data'][:]
+            labels = hf['data'][:]
+
+        noised_data, noised_labels = self._add_noise(
+            data, labels,
+            backgrounds,
+            noise_multiplier,
+        )
+        self._write_noise_data(noised_data, labels, index)
+
+    def _add_noise(self, data, labels, backgrounds, noise_multiplier):
         noised_data = np.repeat(data, self.duplicate_count, axis=0)
-        noised_labels = np.repeat(label, self.duplicate_count, axis=0)
+        noised_labels = np.repeat(labels, self.duplicate_count, axis=0)
 
         sample_length = noised_data.shape[1]
         background_samples = np.zeros(noised_data.shape)
@@ -285,23 +299,29 @@ class MixBackgroundWithRecordings(luigi.Task):
                 random.randrange(num_backgrounds - 1)]
             start = random.randrange(len(selected_background)
                                      - sample_length)
-            background_samples[i, :] = (
-                selected_background[start:start + sample_length]
-                * np.random.uniform(low=noise_multiplier[0],
-                                    high=noise_multiplier[1],
-                                    size=(1, ))
-            )
+            if random.random() < self.percentage:
+                try:
+                    background_samples[i, :] = (
+                        selected_background[start:start + sample_length]
+                        * noise_multiplier
+                    )
+                except ValueError:
+                    background_samples[i, :] = (
+                        selected_background[start:start + sample_length]
+                        * np.random.uniform(low=noise_multiplier[0],
+                                            high=noise_multiplier[1],
+                                            size=(1, ))
+                    )
+        return noised_data + background_samples, noised_labels
 
-        noised_data = noised_data + background_samples
-        noised_data = np.clip(noised_data, -1, 1)
-
+    def _write_noise_data(self, noised_data, labels, index):
         # Writing out here to abuse the stack and keep memory usage lower
         with h5py.File(self.output()['data'][index].path,
                        'w') as hf:
             hf.create_dataset('data', data=noised_data)
         with h5py.File(self.output()['labels'][index].path,
                        'w') as hf:
-            hf.create_dataset('data', data=noised_labels)
+            hf.create_dataset('data', data=labels)
 
     def run(self):
         backgrounds = [scipy.io.wavfile.read(t.path)[1]
