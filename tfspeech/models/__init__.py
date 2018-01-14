@@ -408,7 +408,7 @@ def log_mel_spectrogram_resnet_custom(
 
 
 def log_mel_spectrogram_convnet(
-        filters, max_pool_sizes, kernel_sizes,
+        filters, max_pool_sizes, pool_strides, kernel_sizes,
         batch_size, num_training_samples, spectrogram_opts=None,
         dropout_rate=0.0, initial_learning_rate=0.005):
     # TODO: Add inference graph, see
@@ -450,12 +450,14 @@ def log_mel_spectrogram_convnet(
             strides=1,
             data_format=data_format,
         )
-        inputs = tf.layers.max_pooling2d(
-            inputs=inputs,
-            pool_size=max_pool_sizes[i],
-            strides=1, data_format=data_format)
         inputs = resnet_model.batch_norm_relu(inputs, is_training,
                                               data_format)
+        if max_pool_sizes[i] is not None and max_pool_sizes[i] > 1:
+            inputs = tf.layers.max_pooling2d(
+                inputs=inputs,
+                pool_size=max_pool_sizes[i],
+                strides=pool_strides[i], data_format=data_format)
+
     # TODO Consider dropout
     inputs = tf.reshape(inputs,
                         [-1,
@@ -492,7 +494,7 @@ def log_mel_spectrogram_convnet(
 
     learning_rate = tf.train.exponential_decay(
         initial_learning_rate, global_step,
-        5 * batches_per_epoch, 0.5)
+        4 * batches_per_epoch, 0.5)
 
     # Create a tensor named learning_rate for logging purposes.
     tf.identity(learning_rate, name='learning_rate')
