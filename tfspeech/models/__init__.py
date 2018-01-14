@@ -537,6 +537,8 @@ def log_mel_spectrogram_resnet_v2(
         final_pool_type = tf.layers.average_pooling2d
     elif final_pool_type == 'max':
         final_pool_type = tf.layers.max_pooling2d
+    elif final_pool_type == 'no_pooling':
+        final_pool_type = None
     else:
         raise ValueError
 
@@ -580,9 +582,10 @@ def log_mel_spectrogram_resnet_v2(
         )
     inputs = resnet_model.batch_norm_relu(inputs, is_training,
                                           data_format)
-    inputs = final_pool_type(
-        inputs=inputs, pool_size=final_pool_size, strides=1, padding='VALID',
-        data_format=data_format)
+    if final_pool_type is not None:
+        inputs = final_pool_type(
+            inputs=inputs, pool_size=final_pool_size, strides=1, padding='VALID',
+            data_format=data_format)
 
     inputs = tf.reshape(inputs,
                         [-1,

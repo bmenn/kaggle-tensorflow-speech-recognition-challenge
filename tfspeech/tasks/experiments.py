@@ -616,3 +616,40 @@ class Experiment12(ExperimentBase):
             )
         ]
         return convnet_tasks
+
+
+class Experiment13(ExperimentBase):
+
+    '''Experiment with no pooling at all
+
+    Constants:
+        Models: `ValidateLogMelSpectrogramResNetv2`
+        Spectrogram: Published configuration in
+
+            Tang, 2017. "Honk: A PyTorch Reimplementation of Convolution
+            Neural Networks for Keyword Spotting."
+        Epochs: 50.
+        Dropout Rate: 0.20 (Comparing against previous experiments instead
+        of running a new model with old parametes to save time)
+
+    '''
+
+    def model_tasks(self):
+        convnet_tasks = [
+            train.ValidateLogMelSpectrogramResNetv2(
+                model_settings={'spectrogram_opts': PUB_SPECTROGRAM_OPTS,
+                                'block_sizes': [3, 3, 3],
+                                'block_strides': [1, 2, 2],
+                                'filters': [16, 32, 64],
+                                'kernel_sizes': [3, 3, 3],
+                                'final_pool_type': 'no_pooling',
+                                'initial_learning_rate': 0.001},
+                batch_size=128,
+                num_epochs=50,
+                dropout_rate=0.2,
+                percentage=0.8,
+                noise_volume=0.1,
+                **self.clean_file_params(),
+            )
+        ]
+        return convnet_tasks
