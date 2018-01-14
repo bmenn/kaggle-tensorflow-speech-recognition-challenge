@@ -23,11 +23,17 @@ _formatter = logging.Formatter('%(asctime)-15s %(message)s')
 _sh.setFormatter(_formatter)
 LOGGER.addHandler(_sh)
 
+PUB_SPECTROGRAM_OPTS = {'frame_step': 160,
+                        'fft_length': 480,
+                        'lower_hertz': 20.0,
+                        'upper_hertz': 4000.0,
+                        'num_mel_bins': 40}
+
 
 @luigi.util.inherits(data.DoDataPreProcessing)
 class ExperimentBase(luigi.Task):
 
-    def moel_tasks(self):
+    def model_tasks(self):
         raise NotImplementedError
 
     def requires(self):
@@ -40,6 +46,18 @@ class ExperimentBase(luigi.Task):
                                     percentage=0.1),
             'noisy_0.8': self.clone(data.MixBackgroundWithRecordings,
                                     percentage=0.8),
+        }
+
+    def file_params(self):
+        return {
+            data_files=[t.path for t in
+                        self.input()['clean']['data'][:-1]],
+            label_files=[t.path for t in
+                         self.input()['clean']['labels'][:-1]],
+            validation_data=[t.path for t in
+                             self.input()['clean']['data'][-1:]],
+            validation_labels=[t.path for t in
+                               self.input()['clean']['labels'][-1:]],
         }
 
     def output(self):
@@ -74,16 +92,11 @@ class Experiment1(ExperimentBase):
                             'lower_hertz': 80.0,
                             'upper_hertz': 7600.0,
                             'num_mel_bins': 64}
-    pub_spectrogram_opts = {'frame_step': 160,
-                            'fft_length': 480,
-                            'lower_hertz': 20.0,
-                            'upper_hertz': 4000.0,
-                            'num_mel_bins': 40}
 
     def model_tasks(self):
         resnet_config = list(itertools.product(
             ['clean', 'noisy'],
-            [self.old_spectrogram_opts, self.pub_spectrogram_opts]
+            [self.old_spectrogram_opts, PUB_SPECTROGRAM_OPTS]
         ))
 
         hacked_resnet_tasks = [
@@ -139,11 +152,6 @@ class Experiment2(ExperimentBase):
         Validation Data type: Clean or Noisy (`n_clean == n_noisy`)
 
     '''
-    spectrogram_opts = {'frame_step': 160,
-                        'fft_length': 480,
-                        'lower_hertz': 20.0,
-                        'upper_hertz': 4000.0,
-                        'num_mel_bins': 40}
 
     def model_tasks(self):
         convnet_tasks = [
@@ -156,7 +164,7 @@ class Experiment2(ExperimentBase):
                                  self.input()[data_type]['data'][-1:]],
                 validation_labels=[t.path for t in
                                    self.input()[data_type]['labels'][-1:]],
-                model_settings={'spectrogram_opts': self.spectrogram_opts,
+                model_settings={'spectrogram_opts': PUB_SPECTROGRAM_OPTS,
                                 'filters': [64, 64],
                                 'kernel_sizes': [[20, 8], [10, 4]],
                                 'max_pool_sizes': [2, 1]},
@@ -185,11 +193,6 @@ class Experiment3(ExperimentBase):
         Epochs: 20 vs 40. Evaluate if severe overfitting occurs
 
     '''
-    spectrogram_opts = {'frame_step': 160,
-                        'fft_length': 480,
-                        'lower_hertz': 20.0,
-                        'upper_hertz': 4000.0,
-                        'num_mel_bins': 40}
 
     def model_tasks(self):
         convnet_tasks = [
@@ -202,7 +205,7 @@ class Experiment3(ExperimentBase):
                                  self.input()['clean']['data'][-1:]],
                 validation_labels=[t.path for t in
                                    self.input()['clean']['labels'][-1:]],
-                model_settings={'spectrogram_opts': self.spectrogram_opts,
+                model_settings={'spectrogram_opts': PUB_SPECTROGRAM_OPTS,
                                 'filters': [64, 64],
                                 'kernel_sizes': [[20, 8], [10, 4]],
                                 'max_pool_sizes': [2, 1]},
@@ -234,11 +237,6 @@ class Experiment4(ExperimentBase):
         of running a new model with old parametes to save time)
 
     '''
-    spectrogram_opts = {'frame_step': 160,
-                        'fft_length': 480,
-                        'lower_hertz': 20.0,
-                        'upper_hertz': 4000.0,
-                        'num_mel_bins': 40}
 
     def model_tasks(self):
         convnet_tasks = [
@@ -251,7 +249,7 @@ class Experiment4(ExperimentBase):
                                  self.input()['clean']['data'][-1:]],
                 validation_labels=[t.path for t in
                                    self.input()['clean']['labels'][-1:]],
-                model_settings={'spectrogram_opts': self.spectrogram_opts,
+                model_settings={'spectrogram_opts': PUB_SPECTROGRAM_OPTS,
                                 'filters': [64, 64],
                                 'kernel_sizes': [[20, 8], [10, 4]],
                                 'max_pool_sizes': [2, 1]},
@@ -282,11 +280,6 @@ class Experiment5(ExperimentBase):
             of running a new model with old parametes to save time)
 
     '''
-    spectrogram_opts = {'frame_step': 160,
-                        'fft_length': 480,
-                        'lower_hertz': 20.0,
-                        'upper_hertz': 4000.0,
-                        'num_mel_bins': 40}
 
     def model_tasks(self):
         convnet_tasks = [
@@ -299,7 +292,7 @@ class Experiment5(ExperimentBase):
                                  self.input()['clean']['data'][-1:]],
                 validation_labels=[t.path for t in
                                    self.input()['clean']['labels'][-1:]],
-                model_settings={'spectrogram_opts': self.spectrogram_opts,
+                model_settings={'spectrogram_opts': PUB_SPECTROGRAM_OPTS,
                                 'block_sizes': [3, 3, 3],
                                 'block_strides': [1, 2, 2],
                                 'filters': [16, 32, 64],
@@ -336,11 +329,6 @@ class Experiment6(ExperimentBase):
         Learning rate: 1e-6 (vs original 0.005)
 
     '''
-    spectrogram_opts = {'frame_step': 160,
-                        'fft_length': 480,
-                        'lower_hertz': 20.0,
-                        'upper_hertz': 4000.0,
-                        'num_mel_bins': 40}
 
     def model_tasks(self):
         convnet_tasks = [
@@ -353,7 +341,7 @@ class Experiment6(ExperimentBase):
                                  self.input()['clean']['data'][-1:]],
                 validation_labels=[t.path for t in
                                    self.input()['clean']['labels'][-1:]],
-                model_settings={'spectrogram_opts': self.spectrogram_opts,
+                model_settings={'spectrogram_opts': PUB_SPECTROGRAM_OPTS,
                                 'filters': [64, 64],
                                 'kernel_sizes': [[20, 8], [10, 4]],
                                 'max_pool_sizes': [2, 1],
@@ -385,11 +373,6 @@ class Experiment7(ExperimentBase):
         Training data: 80% of data have random background noise added.
 
     '''
-    spectrogram_opts = {'frame_step': 160,
-                        'fft_length': 480,
-                        'lower_hertz': 20.0,
-                        'upper_hertz': 4000.0,
-                        'num_mel_bins': 40}
 
     def model_tasks(self):
         convnet_tasks = [
@@ -402,7 +385,7 @@ class Experiment7(ExperimentBase):
                                  self.input()['clean']['data'][-1:]],
                 validation_labels=[t.path for t in
                                    self.input()['clean']['labels'][-1:]],
-                model_settings={'spectrogram_opts': self.spectrogram_opts,
+                model_settings={'spectrogram_opts': PUB_SPECTROGRAM_OPTS,
                                 'filters': [64, 64],
                                 'kernel_sizes': [[20, 8], [10, 4]],
                                 'max_pool_sizes': [2, 1],
@@ -436,11 +419,6 @@ class Experiment8(ExperimentBase):
             samples selected for augmentation.
 
     '''
-    spectrogram_opts = {'frame_step': 160,
-                        'fft_length': 480,
-                        'lower_hertz': 20.0,
-                        'upper_hertz': 4000.0,
-                        'num_mel_bins': 40}
 
     def model_tasks(self):
         convnet_tasks = [
@@ -453,7 +431,7 @@ class Experiment8(ExperimentBase):
                                  self.input()['clean']['data'][-1:]],
                 validation_labels=[t.path for t in
                                    self.input()['clean']['labels'][-1:]],
-                model_settings={'spectrogram_opts': self.spectrogram_opts,
+                model_settings={'spectrogram_opts': PUB_SPECTROGRAM_OPTS,
                                 'filters': [64, 64],
                                 'kernel_sizes': [[20, 8], [10, 4]],
                                 'max_pool_sizes': [2, 1],
@@ -488,11 +466,6 @@ class Experiment9(ExperimentBase):
         of running a new model with old parametes to save time)
 
     '''
-    spectrogram_opts = {'frame_step': 160,
-                        'fft_length': 480,
-                        'lower_hertz': 20.0,
-                        'upper_hertz': 4000.0,
-                        'num_mel_bins': 40}
 
     def model_tasks(self):
         convnet_tasks = [
@@ -505,7 +478,7 @@ class Experiment9(ExperimentBase):
                                  self.input()['clean']['data'][-1:]],
                 validation_labels=[t.path for t in
                                    self.input()['clean']['labels'][-1:]],
-                model_settings={'spectrogram_opts': self.spectrogram_opts,
+                model_settings={'spectrogram_opts': PUB_SPECTROGRAM_OPTS,
                                 'filters': [64, 64],
                                 'kernel_sizes': [[20, 8], [10, 4]],
                                 'max_pool_sizes': [2, 1],
@@ -542,11 +515,6 @@ class Experiment10(ExperimentBase):
         Model architecture: Doing 5 residual blocks, `[16, 32, 64, 128, 256]`
 
     '''
-    spectrogram_opts = {'frame_step': 160,
-                        'fft_length': 480,
-                        'lower_hertz': 20.0,
-                        'upper_hertz': 4000.0,
-                        'num_mel_bins': 40}
 
     def model_tasks(self):
         convnet_tasks = [
@@ -559,7 +527,7 @@ class Experiment10(ExperimentBase):
                                  self.input()['clean']['data'][-1:]],
                 validation_labels=[t.path for t in
                                    self.input()['clean']['labels'][-1:]],
-                model_settings={'spectrogram_opts': self.spectrogram_opts,
+                model_settings={'spectrogram_opts': PUB_SPECTROGRAM_OPTS,
                                 'block_sizes': [3, 3, 3, 3, 3],
                                 'block_strides': [1, 1, 1, 1, 1],
                                 'filters': [16, 32, 64, 128, 256],
@@ -570,6 +538,44 @@ class Experiment10(ExperimentBase):
                 dropout_rate=0.2,
                 percentage=0.8,
                 noise_volume=0.1,
+                **self.clean_file_params(),
+            )
+        ]
+        return convnet_tasks
+
+
+class Experiment11(ExperimentBase):
+
+    '''Experiment with a different final pooling size
+
+    Constants:
+        Models: `ValidateLogMelSpectrogramResNetv2`
+        Spectrogram: Published configuration in
+
+            Tang, 2017. "Honk: A PyTorch Reimplementation of Convolution
+            Neural Networks for Keyword Spotting."
+        Epochs: 50.
+        Dropout Rate: 0.20 (Comparing against previous experiments instead
+        of running a new model with old parametes to save time)
+
+    '''
+
+    def model_tasks(self):
+        convnet_tasks = [
+            train.ValidateLogMelSpectrogramResNetv2(
+                model_settings={'spectrogram_opts': PUB_SPECTROGRAM_OPTS,
+                                'block_sizes': [3, 3, 3],
+                                'block_strides': [1, 2, 2],
+                                'filters': [16, 32, 64],
+                                'kernel_sizes': [3, 3, 3],
+                                'final_pool_size': 2,
+                                'initial_learning_rate': 0.01},
+                batch_size=128,
+                num_epochs=50,
+                dropout_rate=0.2,
+                percentage=0.8,
+                noise_volume=0.1,
+                **self.clean_file_params(),
             )
         ]
         return convnet_tasks

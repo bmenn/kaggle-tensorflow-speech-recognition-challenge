@@ -526,7 +526,8 @@ def log_mel_spectrogram_convnet(
 def log_mel_spectrogram_resnet_v2(
         block_sizes, block_strides, filters, kernel_sizes,
         batch_size, num_training_samples, spectrogram_opts=None,
-        dropout_rate=0.0, initial_learning_rate=0.01):
+        dropout_rate=0.0, initial_learning_rate=0.01,
+        final_pool_size=8):
     # TODO: Add inference graph, see
     # tensorflow/tensorflow/examples/speech_commands/freeze.py
     if spectrogram_opts is None:
@@ -572,7 +573,7 @@ def log_mel_spectrogram_resnet_v2(
     inputs = resnet_model.batch_norm_relu(inputs, is_training,
                                           data_format)
     inputs = tf.layers.average_pooling2d(
-        inputs=inputs, pool_size=8, strides=1, padding='VALID',
+        inputs=inputs, pool_size=final_pool_size, strides=1, padding='VALID',
         data_format=data_format)
 
     inputs = tf.reshape(inputs,
