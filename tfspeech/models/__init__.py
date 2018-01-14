@@ -527,11 +527,19 @@ def log_mel_spectrogram_resnet_v2(
         block_sizes, block_strides, filters, kernel_sizes,
         batch_size, num_training_samples, spectrogram_opts=None,
         dropout_rate=0.0, initial_learning_rate=0.01,
-        final_pool_size=8):
+        final_pool_size=8, final_pool_type=None):
     # TODO: Add inference graph, see
     # tensorflow/tensorflow/examples/speech_commands/freeze.py
     if spectrogram_opts is None:
         spectrogram_opts = {}
+
+    if final_pool_type is None or final_pool_type == 'avg':
+        final_pool_type = tf.layers.average_pooling2d
+    elif final_pool_type == 'max':
+        final_pool_type = tf.layers.max_pooling2d
+    else:
+        raise ValueError
+
     data_format = (
         'channels_first' if tf.test.is_built_with_cuda() else 'channels_last')
 
@@ -572,7 +580,7 @@ def log_mel_spectrogram_resnet_v2(
         )
     inputs = resnet_model.batch_norm_relu(inputs, is_training,
                                           data_format)
-    inputs = tf.layers.average_pooling2d(
+    inputs = final_pool_type(
         inputs=inputs, pool_size=final_pool_size, strides=1, padding='VALID',
         data_format=data_format)
 

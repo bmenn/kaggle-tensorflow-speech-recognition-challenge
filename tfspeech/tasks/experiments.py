@@ -48,16 +48,16 @@ class ExperimentBase(luigi.Task):
                                     percentage=0.8),
         }
 
-    def file_params(self):
+    def clean_file_params(self):
         return {
-            data_files=[t.path for t in
-                        self.input()['clean']['data'][:-1]],
-            label_files=[t.path for t in
-                         self.input()['clean']['labels'][:-1]],
-            validation_data=[t.path for t in
-                             self.input()['clean']['data'][-1:]],
-            validation_labels=[t.path for t in
-                               self.input()['clean']['labels'][-1:]],
+            'data_files': [t.path for t in
+                           self.input()['clean']['data'][:-1]],
+            'label_files': [t.path for t in
+                            self.input()['clean']['labels'][:-1]],
+            'validation_data': [t.path for t in
+                                self.input()['clean']['data'][-1:]],
+            'validation_labels': [t.path for t in
+                                  self.input()['clean']['labels'][-1:]],
         }
 
     def output(self):
@@ -538,7 +538,6 @@ class Experiment10(ExperimentBase):
                 dropout_rate=0.2,
                 percentage=0.8,
                 noise_volume=0.1,
-                **self.clean_file_params(),
             )
         ]
         return convnet_tasks
@@ -570,6 +569,44 @@ class Experiment11(ExperimentBase):
                                 'kernel_sizes': [3, 3, 3],
                                 'final_pool_size': 2,
                                 'initial_learning_rate': 0.01},
+                batch_size=128,
+                num_epochs=50,
+                dropout_rate=0.2,
+                percentage=0.8,
+                noise_volume=0.1,
+                **self.clean_file_params(),
+            )
+        ]
+        return convnet_tasks
+
+
+class Experiment12(ExperimentBase):
+
+    '''Experiment with max pooling instead of average pooling.
+
+    Constants:
+        Models: `ValidateLogMelSpectrogramResNetv2`
+        Spectrogram: Published configuration in
+
+            Tang, 2017. "Honk: A PyTorch Reimplementation of Convolution
+            Neural Networks for Keyword Spotting."
+        Epochs: 50.
+        Dropout Rate: 0.20 (Comparing against previous experiments instead
+        of running a new model with old parametes to save time)
+
+    '''
+
+    def model_tasks(self):
+        convnet_tasks = [
+            train.ValidateLogMelSpectrogramResNetv2(
+                model_settings={'spectrogram_opts': PUB_SPECTROGRAM_OPTS,
+                                'block_sizes': [3, 3, 3],
+                                'block_strides': [1, 2, 2],
+                                'filters': [16, 32, 64],
+                                'kernel_sizes': [3, 3, 3],
+                                'final_pool_type': 'max',
+                                'final_pool_size': 8,
+                                'initial_learning_rate': 0.05},
                 batch_size=128,
                 num_epochs=50,
                 dropout_rate=0.2,
