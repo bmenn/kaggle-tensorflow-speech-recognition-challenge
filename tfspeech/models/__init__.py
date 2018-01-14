@@ -603,7 +603,7 @@ def log_mel_spectrogram_resnet_v2(
         [tf.nn.l2_loss(v) for v in tf.trainable_variables()
          if 'batch_normalization' not in v.name])
 
-    initial_learning_rate = initial_learning_rate * batch_size / 128
+    initial_learning_rate = initial_learning_rate
     batches_per_epoch = num_training_samples / batch_size
 
     learning_rate = tf.train.exponential_decay(

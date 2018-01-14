@@ -519,3 +519,57 @@ class Experiment9(ExperimentBase):
             )
         ]
         return convnet_tasks
+
+
+class Experiment10(ExperimentBase):
+
+    '''Experiment with a deeper ResNet
+
+    The model trained in Experiment 9 performed well, let's see what happen
+    with a deeper network.
+
+    Constants:
+        Models: `ValidateLogMelSpectrogramResNetv2`
+        Spectrogram: Published configuration in
+
+            Tang, 2017. "Honk: A PyTorch Reimplementation of Convolution
+            Neural Networks for Keyword Spotting."
+        Epochs: 50.
+        Dropout Rate: 0.20 (Comparing against previous experiments instead
+        of running a new model with old parametes to save time)
+
+    Variables:
+        Model architecture: Doing 5 residual blocks, `[16, 32, 64, 128, 256]`
+
+    '''
+    spectrogram_opts = {'frame_step': 160,
+                        'fft_length': 480,
+                        'lower_hertz': 20.0,
+                        'upper_hertz': 4000.0,
+                        'num_mel_bins': 40}
+
+    def model_tasks(self):
+        convnet_tasks = [
+            train.ValidateLogMelSpectrogramResNetv2(
+                data_files=[t.path for t in
+                            self.input()['clean']['data'][:-1]],
+                label_files=[t.path for t in
+                             self.input()['clean']['labels'][:-1]],
+                validation_data=[t.path for t in
+                                 self.input()['clean']['data'][-1:]],
+                validation_labels=[t.path for t in
+                                   self.input()['clean']['labels'][-1:]],
+                model_settings={'spectrogram_opts': self.spectrogram_opts,
+                                'block_sizes': [3, 3, 3, 3, 3],
+                                'block_strides': [1, 1, 1, 1, 1],
+                                'filters': [16, 32, 64, 128, 256],
+                                'kernel_sizes': [3, 3, 3, 3, 3],
+                                'initial_learning_rate': 0.1},
+                batch_size=32,
+                num_epochs=50,
+                dropout_rate=0.2,
+                percentage=0.8,
+                noise_volume=0.1,
+            )
+        ]
+        return convnet_tasks
