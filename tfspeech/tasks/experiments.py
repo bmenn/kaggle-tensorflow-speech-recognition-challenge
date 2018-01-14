@@ -458,7 +458,7 @@ class Experiment8(ExperimentBase):
                                 'max_pool_sizes': [2, 1],
                                 'pool_strides': [2, 1],
                                 'initial_learning_rate': 0.001},
-                num_epochs=25,
+                num_epochs=40,
                 dropout_rate=0.2,
                 percentage=0.8,
                 noise_volume=0.1,
