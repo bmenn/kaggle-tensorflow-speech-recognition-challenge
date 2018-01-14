@@ -492,16 +492,15 @@ def log_mel_spectrogram_convnet(
     initial_learning_rate = initial_learning_rate * batch_size / 128
     batches_per_epoch = num_training_samples / batch_size
 
-    learning_rate = tf.train.exponential_decay(
-        initial_learning_rate, global_step,
-        4 * batches_per_epoch, 0.5)
+    learning_rate = initial_learning_rate
 
     # Create a tensor named learning_rate for logging purposes.
     tf.identity(learning_rate, name='learning_rate')
     tf.summary.scalar('learning_rate', learning_rate)
 
-    optimizer = tf.train.GradientDescentOptimizer(
-        learning_rate=learning_rate)
+    optimizer = tf.train.MomentumOptimizer(
+        learning_rate=learning_rate,
+        momentum=_MOMENTUM)
 
     # Batch norm requires update_ops to be added as a train_op dependency.
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
