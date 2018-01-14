@@ -307,20 +307,33 @@ class ParametrizedTensorflowModelWithAugmentation(
                 for t in self.input()['background'].values()]
 
         sample_length = x.shape[1]
-        background_samples = np.zeros(x.shape)
+        noised_data = np.zeros(x.shape)
         num_backgrounds = len(self.background_data)
-        for i in range(background_samples.shape[0]):
+        shift_amount = random.randint(-1600, 1600)
+        for i in range(noised_data.shape[0]):
             selected_background = self.background_data[
                 random.randrange(num_backgrounds - 1)]
             start = random.randrange(len(selected_background)
                                      - sample_length)
             if random.random() < self.percentage:
-                background_samples[i, :] = (
+                noised_data[i, :] = (
                     selected_background[start:start + sample_length]
                     * self.noise_volume
                 )
+                if shift_amount > 0:
+                    noised_data[i, :] = noised_data[i, :] + np.pad(
+                        x[i, :],
+                        (shift_amount, 0),
+                        'constant')[:sample_length]
+                else:
+                    noised_data[i, :] = noised_data[i, :] + np.pad(
+                        x[i, :],
+                        (0, -shift_amount),
+                        'constant')[-shift_amount:]
+            else:
+                noised_data[i, :] = x[i, :]
 
-        return x + background_samples, y
+        return np.clip(noised_data, -1, 1, out=noised_data), y
 
 
 class MfccSpectrogramCNN(TrainTensorflowModel):
@@ -420,6 +433,28 @@ class LogMelSpectrogramResNetv2(TrainParametrizedTensorflowModel):
     @staticmethod
     def model_class():
         return models.log_mel_spectrogram_resnet_v2
+
+    def build_graph(self, num_samples):
+        data_sizes = {
+            'num_training_samples': num_samples,
+            'batch_size': self.batch_size,
+        }
+        settings = {**self.model_settings, **data_sizes}
+        return self.model_class()(**settings)
+
+
+class MfccSpectrogramConvNet(
+        ParametrizedTensorflowModelWithAugmentation):
+
+    '''Trains a customized ResNet using log Mel spectrograms
+
+    '''
+    batch_size = luigi.IntParameter()
+    num_epochs = luigi.IntParameter()
+
+    @staticmethod
+    def model_class():
+        return models.mfcc_spectrogram_convnet
 
     def build_graph(self, num_samples):
         data_sizes = {
@@ -607,6 +642,17 @@ class ValidateLogMelSpectrogramConvNet(ValidateTensorflowModel):
 class ValidateLogMelSpectrogramResNetv2(ValidateTensorflowModel):
 
     '''Validates LogMelSpectrogramResNetv2
+
+    '''
+
+    batch_size = luigi.IntParameter(default=128)
+    num_epochs = luigi.IntParameter(default=40)
+
+
+@luigi.util.requires(MfccSpectrogramConvNet)
+class ValidateMfccSpectrogramConvNet(ValidateTensorflowModel):
+
+    '''Validates MfccSpectrogramConvNet
 
     '''
 
