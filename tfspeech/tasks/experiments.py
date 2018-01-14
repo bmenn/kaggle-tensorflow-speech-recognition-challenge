@@ -292,18 +292,19 @@ class Experiment5(ExperimentBase):
         convnet_tasks = [
             train.ValidateLogMelSpectrogramResNetv2(
                 data_files=[t.path for t in
-                            self.input()['noisy']['data'][:-1]],
+                            self.input()['clean']['data'][:-1]],
                 label_files=[t.path for t in
-                             self.input()['noisy']['labels'][:-1]],
+                             self.input()['clean']['labels'][:-1]],
                 validation_data=[t.path for t in
                                  self.input()['clean']['data'][-1:]],
                 validation_labels=[t.path for t in
                                    self.input()['clean']['labels'][-1:]],
                 model_settings={'spectrogram_opts': self.spectrogram_opts,
-                                'block_sizes': [3, 3],
-                                'filters': [64, 64],
-                                'kernel_sizes': [[20, 8], [10, 4]],
-                                'max_pool_sizes': [2, 1]},
+                                'block_sizes': [3, 3, 3],
+                                'block_strides': [1, 2, 2],
+                                'filters': [16, 32, 64],
+                                'kernel_sizes': [3, 3, 3],
+                                'initial_learning_rate': 0.01},
                 num_epochs=50,
                 dropout_rate=dropout_rate
             )

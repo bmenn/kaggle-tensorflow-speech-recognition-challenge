@@ -266,6 +266,7 @@ class TrainTensorflowModel(luigi.Task):
                 raise e
 
 
+            saver.save(sess, self.checkpoint_path)
             builder = tf.saved_model.builder.SavedModelBuilder(self.save_path)
             builder.add_meta_graph_and_variables(sess, ['model',
                                                         self.model_id])
@@ -422,7 +423,8 @@ class LogMelSpectrogramConvNet(
         return self.model_class()(**settings)
 
 
-class LogMelSpectrogramResNetv2(TrainParametrizedTensorflowModel):
+class LogMelSpectrogramResNetv2(
+        ParametrizedTensorflowModelWithAugmentation):
 
     '''Trains a customized ResNet using log Mel spectrograms
 
