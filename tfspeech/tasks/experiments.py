@@ -679,9 +679,9 @@ class Experiment14(ExperimentBase):
         convnet_tasks = [
             train.ValidateLogMelSpectrogramResNetv2(
                 data_files=[t.path for t in
-                            self.input()['clean']['data'][:1]],
+                            self.input()['clean']['data'][:-1]],
                 label_files=[t.path for t in
-                             self.input()['clean']['labels'][:1]],
+                             self.input()['clean']['labels'][:-1]],
                 validation_data=[t.path for t in
                                  self.input()['clean']['data'][-1:]],
                 validation_labels=[t.path for t in
@@ -692,11 +692,11 @@ class Experiment14(ExperimentBase):
                                 'filters': [32, 64, 128],
                                 'kernel_sizes': [3, 3, 3],
                                 'initial_learning_rate': 0.01},
-                num_epochs=75,
+                num_epochs=55,
                 batch_size=128,
                 dropout_rate=0.5,
                 percentage=0.6,
-                noise_volume=0.5,
+                noise_volume=0.8,
             )
         ]
         return convnet_tasks
