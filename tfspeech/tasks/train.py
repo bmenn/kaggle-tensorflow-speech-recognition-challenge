@@ -445,6 +445,28 @@ class LogMelSpectrogramResNetv2(
         return self.model_class()(**settings)
 
 
+class MfccSpectrogramResNet(
+        ParametrizedTensorflowModelWithAugmentation):
+
+    '''Trains a customized ResNet using MFCC spectrograms
+
+    '''
+    batch_size = luigi.IntParameter()
+    num_epochs = luigi.IntParameter()
+
+    @staticmethod
+    def model_class():
+        return models.mfcc_spectrogram_resnet
+
+    def build_graph(self, num_samples):
+        data_sizes = {
+            'num_training_samples': num_samples,
+            'batch_size': self.batch_size,
+        }
+        settings = {**self.model_settings, **data_sizes}
+        return self.model_class()(**settings)
+
+
 class MfccSpectrogramConvNet(
         ParametrizedTensorflowModelWithAugmentation):
 
@@ -644,6 +666,17 @@ class ValidateLogMelSpectrogramConvNet(ValidateTensorflowModel):
 class ValidateLogMelSpectrogramResNetv2(ValidateTensorflowModel):
 
     '''Validates LogMelSpectrogramResNetv2
+
+    '''
+
+    batch_size = luigi.IntParameter(default=128)
+    num_epochs = luigi.IntParameter(default=40)
+
+
+@luigi.util.requires(MfccSpectrogramResNet)
+class ValidateMfccSpectrogramResNet(ValidateTensorflowModel):
+
+    '''Validates MfccSpectrogramResNet
 
     '''
 
