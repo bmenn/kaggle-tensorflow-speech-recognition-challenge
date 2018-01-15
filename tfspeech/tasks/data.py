@@ -52,10 +52,12 @@ class CreateSilenceSnippets(luigi.Task):
 
     def output(self):
         filenames = [
-            '_'.join([background, str(i)]) + '.wav'
+            '_'.join([str(i),
+                      background,
+                      str(i)]) + '.wav'
             for i, background
             in zip(range(self.num_samples),
-                   itertools.cycle(self.input().keys()))
+                   itertools.cycle(sorted(self.input().keys())))
         ]
         return [luigi.LocalTarget('/'.join([self.base_dir, 'silence', fname]))
                 for fname in filenames]
@@ -71,7 +73,7 @@ class CreateSilenceSnippets(luigi.Task):
 
 
         for target in self.output():
-            background_label = target.path.split('/')[-1].split('_')[0]
+            background_label = target.path.split('/')[-1].split('_')[1]
             recording = recordings[background_label]
             sample_rate = recording['sample_rate']
             data = recording['data']

@@ -700,3 +700,57 @@ class Experiment14(ExperimentBase):
             )
         ]
         return convnet_tasks
+
+
+class Experiment15(ExperimentBase):
+
+    '''Evaluate spectrogram_opts configuration
+
+    See if smaller windows improve model performance.
+
+    Constants:
+        Models: `LogMelSpectrogramResNetv2`
+        Spectrogram: Published configuration in
+
+            Tang, 2017. "Honk: A PyTorch Reimplementation of Convolution
+            Neural Networks for Keyword Spotting."
+        Epochs: 50. Slightly longer to allow train accuracy to converge
+            based on previous experiments.
+        Dropout Rate: 0.20 (Comparing against previous experiments instead
+            of running a new model with old parametes to save time)
+
+    '''
+    spectrogram_opts = {'frame_step': 60,
+                        'fft_length': 240,
+                        'lower_hertz': 20.0,
+                        'upper_hertz': 4000.0,
+                        'num_mel_bins': 40}
+
+    def model_tasks(self):
+        convnet_tasks = [
+            train.ValidateLogMelSpectrogramResNetv2(
+                data_files=[t.path for t in
+                            self.input()['clean']['data'][:1]],
+                label_files=[t.path for t in
+                             self.input()['clean']['labels'][:1]],
+                validation_data=[t.path for t in
+                                 self.input()['clean']['data'][-1:]],
+                validation_labels=[t.path for t in
+                                   self.input()['clean']['labels'][-1:]],
+                model_settings={'spectrogram_opts': self.spectrogram_opts,
+                                'block_sizes': [3, 3, 3],
+                                'block_strides': [1, 2, 2],
+                                'filters': [32, 64, 128],
+                                'kernel_sizes': [3, 3, 3],
+                                'initial_learning_rate': 0.01},
+                num_epochs=55,
+                batch_size=128,
+                # dropout_rate=0.5,
+                # percentage=0.6,
+                # noise_volume=0.8,
+                dropout_rate=0.0,
+                percentage=0.0,
+                noise_volume=0.0,
+            )
+        ]
+        return convnet_tasks

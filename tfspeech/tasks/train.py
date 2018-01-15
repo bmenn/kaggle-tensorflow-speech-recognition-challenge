@@ -482,7 +482,7 @@ class ValidateTensorflowModel(luigi.Task):
         base_path = self.requires().save_path
         return {
             'predictions': luigi.LocalTarget(os.path.join(base_path,
-                                                         'predictions.csv')),
+                                                         'predictions.h5')),
             'metrics': luigi.LocalTarget(os.path.join(base_path,
                                                       'metrics.json')),
         }
