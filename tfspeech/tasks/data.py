@@ -192,6 +192,14 @@ class PartitionDataFiles(luigi.Task):
                 for path in glob.iglob(search_dir)
                 if '_background_noise_' not in path
             ])
+
+        unknowns_count = 0
+        for i, fname in reversed(list(enumerate(filenames))):
+            meta = utils.parse_path_metadata(fname)
+            if meta['label'] not in LABELS:
+                # Downsample unknowns
+                if random.random() >= 0.1:
+                    del filenames[i]
         partitions = utils.create_validation_groups(filenames,
                                                     self.num_partitions)
 
