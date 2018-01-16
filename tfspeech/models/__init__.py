@@ -14,6 +14,7 @@ from .constants import *
 log_mel_spectrogram_resnet_v2 = custom.log_mel_spectrogram_resnet_v2
 mfcc_spectrogram_resnet = custom.mfcc_spectrogram_resnet
 multi_spectrogram_resnet = custom.multi_spectrogram_resnet
+mel_mfcc_spectrogram_resnet = custom.mel_mfcc_spectrogram_resnet
 
 
 def mfcc_spectrogram_cnn():

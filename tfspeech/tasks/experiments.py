@@ -735,3 +735,38 @@ class Experiment17(ExperimentBase):
             )
         ]
         return convnet_tasks
+
+
+class Experiment18(ExperimentBase):
+
+    '''Evaluate Mel and MFCC spectrograms
+
+    '''
+
+    def model_tasks(self):
+        convnet_tasks = [
+            train.ValidateMelMfccSpectrogramResNet(
+                data_files=[t.path for t in
+                            self.input()['clean']['data'][:1]],
+                label_files=[t.path for t in
+                             self.input()['clean']['labels'][:1]],
+                validation_data=[t.path for t in
+                                 self.input()['clean']['data'][-1:]],
+                validation_labels=[t.path for t in
+                                   self.input()['clean']['labels'][-1:]],
+                model_settings={'spectrogram_opts': PUB_SPECTROGRAM_OPTS,
+                                'block_sizes': [5, 5, 5],
+                                'block_strides': [1, 2, 2],
+                                'filters': [32, 64, 128],
+                                'kernel_sizes': [3, 3, 3],
+                                'initial_learning_rate': 0.01,
+                                'lr_decay_rate': 0.1,
+                                'lr_decay_epochs': 20},
+                num_epochs=50,
+                batch_size=128,
+                dropout_rate=0.0,
+                percentage=0.6,
+                noise_volume=0.8,
+            )
+        ]
+        return convnet_tasks

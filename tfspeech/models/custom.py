@@ -420,3 +420,113 @@ def multi_spectrogram_resnet(
         'is_training': is_training,
         'y_predict': predictions['classes'],
     }
+
+
+def mel_mfcc_spectrogram_resnet(
+        block_sizes, block_strides, filters, kernel_sizes,
+        batch_size, num_training_samples, spectrogram_opts,
+        initial_learning_rate=0.01,
+        lr_decay_rate=0.5, lr_decay_epochs=10,
+        final_pool_size=8, final_pool_type=None):
+    # TODO: Add inference graph, see
+    # tensorflow/tensorflow/examples/speech_commands/freeze.py
+    if spectrogram_opts is None:
+        spectrogram_opts = {}
+
+    if final_pool_type is None or final_pool_type == 'avg':
+        final_pool_type = tf.layers.average_pooling2d
+    elif final_pool_type == 'max':
+        final_pool_type = tf.layers.max_pooling2d
+    elif final_pool_type == 'no_pooling':
+        final_pool_type = None
+    else:
+        raise ValueError
+
+    data_format = (
+        'channels_first' if tf.test.is_built_with_cuda() else 'channels_last')
+
+    inputs = input_tensors()
+    x = inputs['wav_input']
+    s = inputs['sample_rate']
+    y_ = inputs['label']
+    is_training = inputs['is_training']
+    keep_prob = tf.placeholder(tf.float32, name='keep_probability')
+    global_step = tf.train.get_or_create_global_step()
+
+    log_mel = spectrogram_resnet_block(x, s, spectrogram_opts,
+                                      block_sizes, block_strides,
+                                      filters, kernel_sizes,
+                                      data_format, is_training,
+                                      final_pool_type, final_pool_size)
+    mfccs = tf.contrib.signal.mfccs_from_log_mel_spectrograms(
+        log_mel)[..., 1:13]
+
+    log_mel = tf.reshape(log_mel,
+                        [-1,
+                         log_mel.shape[-3].value
+                         * log_mel.shape[-2].value
+                         * log_mel.shape[-1].value])
+    mfccs = tf.reshape(mfccs,
+                        [-1,
+                         mfccs.shape[-3].value
+                         * mfccs.shape[-2].value
+                         * mfccs.shape[-1].value])
+
+    inputs = tf.concat([log_mel, mfccs], 1)
+    logits = tf.layers.dense(inputs=inputs, units=len(LABELS))
+    logits = tf.identity(logits, 'final_dense')
+
+    predictions = {
+        'classes': tf.argmax(logits, axis=1, name='predict'),
+        'probabilities': tf.nn.softmax(logits, name='softmax_tensor')
+    }
+
+    cross_entropy = tf.losses.softmax_cross_entropy(
+        logits=logits, onehot_labels=y_)
+
+    # Create a tensor named cross_entropy for logging purposes.
+    with tf.variable_scope('loss'):
+        tf.identity(cross_entropy, name='cross_entropy')
+    tf.summary.scalar('cross_entropy', cross_entropy)
+
+    # Add weight decay to the loss. We exclude the batch norm variables because
+    # doing so leads to a small improvement in accuracy.
+    loss = cross_entropy + _WEIGHT_DECAY * tf.add_n(
+        [tf.nn.l2_loss(v) for v in tf.trainable_variables()
+         if 'batch_normalization' not in v.name])
+
+    initial_learning_rate = initial_learning_rate
+    batches_per_epoch = num_training_samples / batch_size
+
+    learning_rate = tf.train.exponential_decay(
+        initial_learning_rate, global_step,
+        decay_steps=lr_decay_epochs * batches_per_epoch,
+        decay_rate=lr_decay_rate,
+        staircase=True)
+
+    # Create a tensor named learning_rate for logging purposes.
+    tf.identity(learning_rate, name='learning_rate')
+    tf.summary.scalar('learning_rate', learning_rate)
+
+    optimizer = tf.train.MomentumOptimizer(
+        learning_rate=learning_rate,
+        momentum=_MOMENTUM)
+
+    # Batch norm requires update_ops to be added as a train_op dependency.
+    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    with tf.control_dependencies(update_ops):
+        train_op = optimizer.minimize(loss, global_step, name='train_step')
+
+    with tf.name_scope('train_metrics'):
+        correct_prediction = tf.equal(predictions['classes'], tf.argmax(y_, 1))
+        accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32),
+                                  name='accuracy')
+
+    return {
+        'train_step': train_op,
+        'x': x,
+        'y': y_,
+        's': s,
+        'is_training': is_training,
+        'y_predict': predictions['classes'],
+    }
