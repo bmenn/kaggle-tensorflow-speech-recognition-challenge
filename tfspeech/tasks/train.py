@@ -234,7 +234,7 @@ class TrainTensorflowModel(luigi.Task):
                     if i % steps_per_epoch == 0:
                         self._before_epoch(i, steps, sess, saver)
 
-                    if i % int(steps_per_epoch * 0.01) == 0:
+                    if i % int(steps_per_epoch * 0.05) == 0:
                         self._summary_metrics(
                             i, x_, y_,
                             x_valid, y_valid,
@@ -489,6 +489,28 @@ class MfccSpectrogramConvNet(
         return self.model_class()(**settings)
 
 
+class MultiSpectrogramResNet(
+        ParametrizedTensorflowModelWithAugmentation):
+
+    '''Trains a customized ResNet using multiple log Mel spectrograms
+
+    '''
+    batch_size = luigi.IntParameter()
+    num_epochs = luigi.IntParameter()
+
+    @staticmethod
+    def model_class():
+        return models.multi_spectrogram_resnet
+
+    def build_graph(self, num_samples):
+        data_sizes = {
+            'num_training_samples': num_samples,
+            'batch_size': self.batch_size,
+        }
+        settings = {**self.model_settings, **data_sizes}
+        return self.model_class()(**settings)
+
+
 @luigi.util.inherits(TrainTensorflowModel)
 class ValidateTensorflowModel(luigi.Task):
 
@@ -688,6 +710,17 @@ class ValidateMfccSpectrogramResNet(ValidateTensorflowModel):
 class ValidateMfccSpectrogramConvNet(ValidateTensorflowModel):
 
     '''Validates MfccSpectrogramConvNet
+
+    '''
+
+    batch_size = luigi.IntParameter(default=128)
+    num_epochs = luigi.IntParameter(default=40)
+
+
+@luigi.util.requires(MultiSpectrogramResNet)
+class ValidateMultiSpectrogramResNet(ValidateTensorflowModel):
+
+    '''Validates MultiSpectrogramConvNet
 
     '''
 

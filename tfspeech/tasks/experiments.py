@@ -679,22 +679,24 @@ class Experiment14(ExperimentBase):
         convnet_tasks = [
             train.ValidateLogMelSpectrogramResNetv2(
                 data_files=[t.path for t in
-                            self.input()['clean']['data'][:-1]],
+                            self.input()['clean']['data'][:1]],
                 label_files=[t.path for t in
-                             self.input()['clean']['labels'][:-1]],
+                             self.input()['clean']['labels'][:1]],
                 validation_data=[t.path for t in
                                  self.input()['clean']['data'][-1:]],
                 validation_labels=[t.path for t in
                                    self.input()['clean']['labels'][-1:]],
                 model_settings={'spectrogram_opts': PUB_SPECTROGRAM_OPTS,
-                                'block_sizes': [3, 3, 3],
+                                'block_sizes': [5, 5, 5],
                                 'block_strides': [1, 2, 2],
                                 'filters': [32, 64, 128],
                                 'kernel_sizes': [3, 3, 3],
-                                'initial_learning_rate': 0.01},
-                num_epochs=55,
+                                'initial_learning_rate': 0.01,
+                                'lr_decay_rate': 0.1,
+                                'lr_decay_epochs': 20},
+                num_epochs=50,
                 batch_size=128,
-                dropout_rate=0.5,
+                dropout_rate=0.0,
                 percentage=0.6,
                 noise_volume=0.8,
             )
@@ -702,29 +704,15 @@ class Experiment14(ExperimentBase):
         return convnet_tasks
 
 
-class Experiment16(ExperimentBase):
+class Experiment17(ExperimentBase):
 
-    '''Evaluate MFCC ResNet
-
-    Checking the hypothesis that a two layer ConvNet has trouble storing
-    enough information. Hoping a ResNet does not have this trouble.
-
-    Constants:
-        Models: `LogMelSpectrogramResNetv2`
-        Spectrogram: Published configuration in
-
-            Tang, 2017. "Honk: A PyTorch Reimplementation of Convolution
-            Neural Networks for Keyword Spotting."
-        Epochs: 50. Slightly longer to allow train accuracy to converge
-            based on previous experiments.
-        Dropout Rate: 0.20 (Comparing against previous experiments instead
-            of running a new model with old parametes to save time)
+    '''Evaluate MultiResolution ResNet
 
     '''
 
     def model_tasks(self):
         convnet_tasks = [
-            train.ValidateMfccSpectrogramResNet(
+            train.ValidateMultiSpectrogramResNet(
                 data_files=[t.path for t in
                             self.input()['clean']['data'][:1]],
                 label_files=[t.path for t in
@@ -734,17 +722,15 @@ class Experiment16(ExperimentBase):
                 validation_labels=[t.path for t in
                                    self.input()['clean']['labels'][-1:]],
                 model_settings={'spectrogram_opts': PUB_SPECTROGRAM_OPTS,
-                                'block_sizes': [3, 3, 3],
-                                'block_strides': [1, 1, 1],
+                                'block_sizes': [6, 6, 6],
+                                'block_strides': [1, 2, 2],
                                 'filters': [32, 64, 128],
-                                'kernel_sizes': [2, 2, 2],
-                                'final_pool_type': 'avg',
-                                'final_pool_size': 2,
-                                'initial_learning_rate': 0.0001},
-                num_epochs=40,
-                batch_size=128,
+                                'kernel_sizes': [3, 3, 3],
+                                'initial_learning_rate': 0.0025},
+                num_epochs=75,
+                batch_size=64,
                 dropout_rate=0.0,
-                percentage=0.2,
+                percentage=0.6,
                 noise_volume=0.8,
             )
         ]
