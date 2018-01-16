@@ -198,7 +198,7 @@ class PartitionDataFiles(luigi.Task):
             meta = utils.parse_path_metadata(fname)
             if meta['label'] not in LABELS:
                 # Downsample unknowns
-                if random.random() >= 0.1:
+                if random.random() >= 0.0577:
                     del filenames[i]
         partitions = utils.create_validation_groups(filenames,
                                                     self.num_partitions)
@@ -230,7 +230,7 @@ class DoDataPreProcessing(luigi.Task):
 
     def run(self):
         yield CreateSilenceSnippets(
-            num_samples=2000,
+            num_samples=2375,
         )
 
         yield self.clone(PartitionDataFiles)

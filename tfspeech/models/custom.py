@@ -83,15 +83,19 @@ def log_mel_spectrogram_resnet_v2(
     global_step = tf.train.get_or_create_global_step()
 
     inputs = spectrogram_resnet_block(x, s, spectrogram_opts,
-                                      block_size, block_strides,
-                                      filters, kernel_sizes)
+                                      block_sizes, block_strides,
+                                      filters, kernel_sizes,
+                                      data_format, is_training,
+                                      final_pool_type, final_pool_size )
 
     inputs = tf.reshape(inputs,
                         [-1,
                          inputs.shape[-3].value
                          * inputs.shape[-2].value
                          * inputs.shape[-1].value])
-    inputs = tf.nn.dropout(inputs, keep_prob)
+    inputs = resnet_model.batch_norm_relu(
+        tf.layers.dense(inputs=inputs, units=1024),
+        is_training, data_format)
     logits = tf.layers.dense(inputs=inputs, units=len(LABELS))
     logits = tf.identity(logits, 'final_dense')
 
@@ -314,15 +318,10 @@ def multi_spectrogram_resnet(
     global_step = tf.train.get_or_create_global_step()
 
     fine_spectrogram_opts = dict(spectrogram_opts)
-    coarse_spectrogram_opts = dict(spectrogram_opts)
 
     fine_spectrogram_opts.update({
         'frame_step': int(spectrogram_opts['frame_step'] / 2),
         'fft_length': int(spectrogram_opts['fft_length'] / 2),
-    })
-    coarse_spectrogram_opts.update({
-        'frame_step': int(spectrogram_opts['frame_step'] * 2),
-        'fft_length': int(spectrogram_opts['fft_length'] * 2),
     })
 
     fine = spectrogram_resnet_block(x, s, fine_spectrogram_opts,
@@ -331,11 +330,6 @@ def multi_spectrogram_resnet(
                                     data_format, is_training,
                                     final_pool_type, final_pool_size)
     medium = spectrogram_resnet_block(x, s, spectrogram_opts,
-                                      block_sizes, block_strides,
-                                      filters, kernel_sizes,
-                                      data_format, is_training,
-                                      final_pool_type, final_pool_size)
-    coarse = spectrogram_resnet_block(x, s, coarse_spectrogram_opts,
                                       block_sizes, block_strides,
                                       filters, kernel_sizes,
                                       data_format, is_training,
@@ -351,13 +345,8 @@ def multi_spectrogram_resnet(
                          medium.shape[-3].value
                          * medium.shape[-2].value
                          * medium.shape[-1].value])
-    coarse = tf.reshape(coarse,
-                        [-1,
-                         coarse.shape[-3].value
-                         * coarse.shape[-2].value
-                         * coarse.shape[-1].value])
 
-    inputs = tf.concat([fine, medium, coarse], 1)
+    inputs = tf.concat([fine, medium], 1)
     logits = tf.layers.dense(inputs=inputs, units=len(LABELS))
     logits = tf.identity(logits, 'final_dense')
 

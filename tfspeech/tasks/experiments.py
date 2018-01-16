@@ -679,9 +679,9 @@ class Experiment14(ExperimentBase):
         convnet_tasks = [
             train.ValidateLogMelSpectrogramResNetv2(
                 data_files=[t.path for t in
-                            self.input()['clean']['data'][:1]],
+                            self.input()['clean']['data'][:-2]],
                 label_files=[t.path for t in
-                             self.input()['clean']['labels'][:1]],
+                             self.input()['clean']['labels'][:-2]],
                 validation_data=[t.path for t in
                                  self.input()['clean']['data'][-1:]],
                 validation_labels=[t.path for t in
@@ -694,7 +694,7 @@ class Experiment14(ExperimentBase):
                                 'initial_learning_rate': 0.01,
                                 'lr_decay_rate': 0.1,
                                 'lr_decay_epochs': 20},
-                num_epochs=50,
+                num_epochs=75,
                 batch_size=128,
                 dropout_rate=0.0,
                 percentage=0.6,
@@ -714,24 +714,27 @@ class Experiment17(ExperimentBase):
         convnet_tasks = [
             train.ValidateMultiSpectrogramResNet(
                 data_files=[t.path for t in
-                            self.input()['clean']['data'][:1]],
+                            self.input()['clean']['data'][:2]],
                 label_files=[t.path for t in
-                             self.input()['clean']['labels'][:1]],
+                             self.input()['clean']['labels'][:2]],
                 validation_data=[t.path for t in
                                  self.input()['clean']['data'][-1:]],
                 validation_labels=[t.path for t in
                                    self.input()['clean']['labels'][-1:]],
                 model_settings={'spectrogram_opts': PUB_SPECTROGRAM_OPTS,
-                                'block_sizes': [6, 6, 6],
-                                'block_strides': [1, 2, 2],
-                                'filters': [32, 64, 128],
-                                'kernel_sizes': [3, 3, 3],
-                                'initial_learning_rate': 0.0025},
-                num_epochs=75,
-                batch_size=64,
+                                'block_sizes': [3, 4, 6],
+                                'block_strides': [1, [1, 2], [1, 2]],
+                                'filters': [64, 128, 256],
+                                'kernel_sizes': [[1, 3], [1, 3], [1, 3]],
+                                'final_pool_size': [1, 5],
+                                'initial_learning_rate': 0.0001,
+                                'lr_decay_rate': 0.1,
+                                'lr_decay_epochs': 20},
+                num_epochs=40,
+                batch_size=32,
                 dropout_rate=0.0,
-                percentage=0.6,
-                noise_volume=0.8,
+                percentage=0.5,
+                noise_volume=0.1,
             )
         ]
         return convnet_tasks
@@ -770,3 +773,12 @@ class Experiment18(ExperimentBase):
             )
         ]
         return convnet_tasks
+
+
+@luigi.util.inherits(ExperimentBase)
+class NextExperiments(luigi.WrapperTask):
+    def requires(self):
+        return [
+            self.clone(Experiment14),
+            self.clone(Experiment17)
+        ]

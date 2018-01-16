@@ -32,6 +32,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import numpy as np
 import tensorflow as tf
 
 _BATCH_NORM_DECAY = 0.997
@@ -64,16 +65,34 @@ def fixed_padding(inputs, kernel_size, data_format):
     A tensor with the same format as the input with the data either intact
     (if kernel_size == 1) or padded (if kernel_size > 1).
   """
-  pad_total = kernel_size - 1
+  if kernel_size == 1:
+      return inputs
+
+  pad_total = np.array(kernel_size) - 1
   pad_beg = pad_total // 2
   pad_end = pad_total - pad_beg
 
   if data_format == 'channels_first':
-    padded_inputs = tf.pad(inputs, [[0, 0], [0, 0],
-                                    [pad_beg, pad_end], [pad_beg, pad_end]])
+    try:
+       padded_inputs = tf.pad(inputs, [[0, 0], [0, 0],
+                                       [pad_beg[0], pad_end[0]],
+                                       [pad_beg[1], pad_end[1]]])
+    except IndexError:
+       padded_inputs = tf.pad(inputs, [[0, 0], [0, 0],
+                                       [pad_beg, pad_end],
+                                       [pad_beg, pad_end]])
   else:
-    padded_inputs = tf.pad(inputs, [[0, 0], [pad_beg, pad_end],
-                                    [pad_beg, pad_end], [0, 0]])
+    try:
+      padded_inputs = tf.pad(inputs, [[0, 0],
+                                      [pad_beg[0], pad_end[0]],
+                                      [pad_beg[1], pad_end[1]],
+                                      [0, 0]])
+    except IndexError:
+      padded_inputs = tf.pad(inputs, [[0, 0],
+                                      [pad_beg, pad_end],
+                                      [pad_beg, pad_end],
+                                      [0, 0]])
+
   return padded_inputs
 
 
@@ -81,8 +100,12 @@ def conv2d_fixed_padding(inputs, filters, kernel_size, strides, data_format):
   """Strided 2-D convolution with explicit padding."""
   # The padding is consistent and is based only on `kernel_size`, not on the
   # dimensions of `inputs` (as opposed to using `tf.layers.conv2d` alone).
-  if strides > 1:
-    inputs = fixed_padding(inputs, kernel_size, data_format)
+  try:
+      if strides > 1:
+        inputs = fixed_padding(inputs, kernel_size, data_format)
+  except TypeError:
+      if max(strides) > 1:
+        inputs = fixed_padding(inputs, kernel_size, data_format)
 
   return tf.layers.conv2d(
       inputs=inputs, filters=filters, kernel_size=kernel_size, strides=strides,
