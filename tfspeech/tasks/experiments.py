@@ -682,6 +682,10 @@ class Experiment14(ExperimentBase):
                             self.input()['clean']['data'][:-2]],
                 label_files=[t.path for t in
                              self.input()['clean']['labels'][:-2]],
+                test_data=[t.path for t in
+                           self.input()['clean']['data'][-2:-1]],
+                test_labels=[t.path for t in
+                             self.input()['clean']['labels'][-2:-1]],
                 validation_data=[t.path for t in
                                  self.input()['clean']['data'][-1:]],
                 validation_labels=[t.path for t in

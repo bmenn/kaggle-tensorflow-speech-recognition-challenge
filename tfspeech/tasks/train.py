@@ -541,14 +541,18 @@ class ValidateTensorflowModel(luigi.Task):
     '''
     validation_data = luigi.ListParameter()
     validation_labels = luigi.ListParameter()
+    test_data = luigi.ListParameter(default=None)
+    test_labels = luigi.ListParameter(default=None)
 
     resources = {'tensorflow': 1}
 
     def output(self):
         base_path = self.requires().save_path
         return {
-            'predictions': luigi.LocalTarget(os.path.join(base_path,
-                                                         'predictions.h5')),
+            'validation': luigi.LocalTarget(os.path.join(base_path,
+                                                         'validation_pred.h5')),
+            'testing': luigi.LocalTarget(os.path.join(base_path,
+                                                      'testing_pred.h5')),
             'metrics': luigi.LocalTarget(os.path.join(base_path,
                                                       'metrics.json')),
         }
@@ -576,11 +580,17 @@ class ValidateTensorflowModel(luigi.Task):
         return data
 
     def run(self):
-        train_x = self._combine_h5_files(self.data_files)
-        train_y = self._combine_h5_files(self.label_files)
+        x_train = self._combine_h5_files(self.data_files)
+        y_train = self._combine_h5_files(self.label_files)
 
-        x = self._combine_h5_files(self.validation_data)
-        y = self._combine_h5_files(self.validation_labels)
+        x_valid = self._combine_h5_files(self.validation_data)
+        y_valid = self._combine_h5_files(self.validation_labels)
+
+        x_test = []
+        y_test = []
+        if self.test_data and self.test_labels:
+            x_test = self._combine_h5_files(self.test_data)
+            y_test = self._combine_h5_files(self.test_labels)
 
         with tf.Session(graph=tf.Graph()) as sess:
             tf.saved_model.loader.load(
@@ -592,12 +602,12 @@ class ValidateTensorflowModel(luigi.Task):
             # Normally training is not done with a dropout set to 0 (i.e.,
             # keep_prob=1.0), but we only need to check that the model is
             # updating.
-            predictions = []
-            for i in range(0, len(y), self.batch_size):
+            valid_predictions = []
+            for i in range(0, len(y_valid), self.batch_size):
                 feed_dict = {
-                    'training/wav_input:0': x[i:i+self.batch_size],
-                    'training/label:0': y[i:i+self.batch_size],
-                    'training/sample_rate:0': 16000 * np.ones((len(y[i:i+self.batch_size]), 1)),
+                    'training/wav_input:0': x_valid[i:i+self.batch_size],
+                    'training/label:0': y_valid[i:i+self.batch_size],
+                    'training/sample_rate:0': 16000 * np.ones((len(y_valid[i:i+self.batch_size]), 1)),
                 }
                 try:
                     sess.graph.get_operation_by_name('keep_probability')
@@ -609,17 +619,17 @@ class ValidateTensorflowModel(luigi.Task):
                     feed_dict.update({'training/is_training:0': False})
                 except KeyError:
                     pass
-                predictions.append(sess.run(
+                valid_predictions.append(sess.run(
                     'predict:0',
                     feed_dict=feed_dict
                 ))
 
             train_predictions = []
-            for i in range(0, len(train_y), self.batch_size):
+            for i in range(0, len(y_train), self.batch_size):
                 feed_dict = {
-                    'training/wav_input:0': train_x[i:i+self.batch_size],
-                    'training/label:0': train_y[i:i+self.batch_size],
-                    'training/sample_rate:0': 16000 * np.ones((len(train_y[i:i+self.batch_size]), 1)),
+                    'training/wav_input:0': x_train[i:i+self.batch_size],
+                    'training/label:0': y_train[i:i+self.batch_size],
+                    'training/sample_rate:0': 16000 * np.ones((len(y_train[i:i+self.batch_size]), 1)),
                 }
                 try:
                     sess.graph.get_operation_by_name('keep_probability')
@@ -636,18 +646,52 @@ class ValidateTensorflowModel(luigi.Task):
                     feed_dict=feed_dict
                 ))
 
-        predictions = np.concatenate(predictions).reshape((-1, 1))
-        y_labels = np.argmax(y, axis=1).reshape((-1, 1))
-        prediction_labels = np.hstack([predictions, y_labels])
-        with h5py.File(self.output()['predictions'].path, 'w') as hf:
-            hf.create_dataset('data', data=prediction_labels)
+            test_predictions = []
+            for i in range(0, len(y_test), self.batch_size):
+                feed_dict = {
+                    'training/wav_input:0': x_test[i:i+self.batch_size],
+                    'training/label:0': y_test[i:i+self.batch_size],
+                    'training/sample_rate:0': 16000 * np.ones((len(y_test[i:i+self.batch_size]), 1)),
+                }
+                try:
+                    sess.graph.get_operation_by_name('keep_probability')
+                    feed_dict.update({'keep_probability:0': 1.0})
+                except KeyError:
+                    pass
+                try:
+                    sess.graph.get_operation_by_name('training/is_training')
+                    feed_dict.update({'training/is_training:0': False})
+                except KeyError:
+                    pass
+                test_predictions.append(sess.run(
+                    'predict:0',
+                    feed_dict=feed_dict
+                ))
+
+
+        valid_predictions = np.concatenate(valid_predictions).reshape((-1, 1))
+        y_valid_labels = np.argmax(y_valid, axis=1).reshape((-1, 1))
+        valid_prediction_labels = np.hstack([valid_predictions,
+                                             y_valid_labels])
+        with h5py.File(self.output()['validation'].path, 'w') as hf:
+            hf.create_dataset('data', data=valid_prediction_labels)
+
+        test_predictions = np.concatenate(test_predictions).reshape((-1, 1))
+        y_test_labels = np.argmax(y_test, axis=1).reshape((-1, 1))
+        if len(test_predictions) > 0:
+            test_prediction_labels = np.hstack([test_predictions, y_test_labels])
+        else:
+            test_prediction_labels = np.array([])
+        with h5py.File(self.output()['testing'].path, 'w') as hf:
+            hf.create_dataset('data', data=test_prediction_labels)
 
         train_predictions = np.concatenate(train_predictions).reshape((-1, 1))
-        train_y_labels = np.argmax(train_y, axis=1).reshape((-1, 1))
+        y_train_labels = np.argmax(y_train, axis=1).reshape((-1, 1))
 
         metrics = {
-            'accuracy': np.sum(np.equal(predictions, y_labels)) / len(y_labels),
-            'train_accuracy': np.sum(np.equal(train_predictions, train_y_labels)) / len(train_y_labels)
+            'accuracy': np.sum(np.equal(valid_predictions, y_valid_labels)) / len(y_valid_labels),
+            'test_accuracy': np.sum(np.equal(test_predictions, y_test_labels)) / len(y_test_labels),
+            'train_accuracy': np.sum(np.equal(train_predictions, y_train_labels)) / len(y_train_labels)
         }
         metrics_json = json.dumps(metrics, separators=(',', ':'),
                                   sort_keys=True)
